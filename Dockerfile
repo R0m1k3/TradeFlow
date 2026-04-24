@@ -5,6 +5,14 @@ RUN groupadd -r tradeflow && useradd -r -g tradeflow tradeflow
 
 WORKDIR /app
 
+# Install system-level build dependencies required for C-extension packages
+# (pandas, numpy, lxml all require gcc on slim images)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        python3-dev \
+        libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies first for layer caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
