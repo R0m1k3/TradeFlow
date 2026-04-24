@@ -20,7 +20,7 @@ from app.analysis.composite import compute_composite_score
 from app.bot.live_trader import create_live_session, get_active_live_session, stop_live_session
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
-from app.data.nasdaq import get_nasdaq_tickers, search_tickers, TOP_NASDAQ
+from app.data.nasdaq import get_all_tickers, get_display_name, get_currency, format_price, format_price_sign, search_tickers
 from app.database.models import Portfolio as PortfolioModel, SimRun, Trade
 from app.database.session import get_session, init_database
 from app.strategies.base import Signal
@@ -51,12 +51,13 @@ st_autorefresh(interval=15000, key="stream_refresh")
 
 init_database()
 
-# ── Load NASDAQ tickers ─────────────────────────────────────────────────────────
+# ── Load tickers ────────────────────────────────────────────────────────────────
 
-NASDAQ_TICKERS = get_nasdaq_tickers()
+ALL_TICKERS = get_all_tickers()
+TICKER_DISPLAY = {sym: get_display_name(sym) for sym in ALL_TICKERS}
 
-# Default selection: top NASDAQ by market cap
-DEFAULT_PICKS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA", "AMD"]
+# Default selection
+DEFAULT_PICKS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA", "MC.PA"]
 
 
 # ── SVG Gauge builder ──────────────────────────────────────────────────────────
@@ -105,6 +106,9 @@ def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = F
     badge_cls = signal_badge_class(s)
     badge_label = signal_label(s)
     explain = explain_score(s)
+    display_name = get_display_name(symbol)
+    currency = get_currency(symbol)
+    price_str = format_price(price, currency)
     detail_html = ""
     if show_detail:
         detail_html = f"""
@@ -125,8 +129,8 @@ def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = F
         </div>"""
     return f"""
     <div class="tf-card {cc}">
-        <div class="tf-card-symbol">{symbol}</div>
-        <div class="tf-card-price">${price:.2f}</div>
+        <div class="tf-card-symbol">{display_name}</div>
+        <div class="tf-card-price">{price_str}</div>
         {gauge_svg(s, size=120)}
         <div class="tf-badge {badge_cls}">{badge_label}</div>
         <div class="tf-explain">{explain}</div>
@@ -138,23 +142,26 @@ def position_card_html(symbol: str, qty: float, avg: float, cur: float) -> str:
     unrealized = (cur - avg) * qty
     cls = pnl_class(unrealized)
     c = pnl_color(unrealized)
-    sign = "+" if unrealized >= 0 else ""
+    display_name = get_display_name(symbol)
+    currency = get_currency(symbol)
+    pnl_str = format_price_sign(unrealized, currency)
     return f"""
     <div class="tf-position {cls}">
         <div>
-            <div class="tf-position-symbol">{symbol}</div>
-            <div class="tf-position-detail">{qty:.4f} actions &middot; ${avg:.2f} &rarr; ${cur:.2f}</div>
+            <div class="tf-position-symbol">{display_name}</div>
+            <div class="tf-position-detail">{qty:.4f} actions &middot; {format_price(avg, currency)} &rarr; {format_price(cur, currency)}</div>
         </div>
-        <div class="tf-position-pnl {cls}" style="color:{c};font-size:1rem;">{sign}${unrealized:.2f}</div>
+        <div class="tf-position-pnl {cls}" style="color:{c};font-size:1rem;">{pnl_str}</div>
     </div>"""
 
 
-def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl: str = "", reason: str = "") -> str:
+def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl: str = "", reason: str = "", currency: str = "EUR") -> str:
     side_cls = "tf-trade-side-buy" if side == "BUY" else "tf-trade-side-sell"
     side_label = "ACHAT" if side == "BUY" else "VENTE"
+    display_name = get_display_name(symbol)
     pnl_html = ""
     if pnl:
-        val = float(pnl.replace("$", "").replace(",", "").replace("+", ""))
+        val = float(pnl.replace("€", "").replace("$", "").replace(",", "").replace("+", ""))
         c = pnl_color(val)
         pnl_html = f'<span class="tf-trade-pnl {pnl_class(val)}" style="color:{c}">{pnl}</span>'
     reason_html = f'<span style="color:#8B949E;font-size:0.75rem;margin-left:auto;">{reason}</span>' if reason else ""
@@ -162,7 +169,7 @@ def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl:
     <div class="tf-trade-row">
         <span class="tf-trade-time">{time}</span>
         <span class="{side_cls}">{side_label}</span>
-        <span class="tf-trade-symbol">{symbol}</span>
+        <span class="tf-trade-symbol">{display_name}</span>
         <span class="tf-trade-qty">{qty}</span>
         <span class="tf-trade-price">{price}</span>
         {pnl_html}
@@ -191,10 +198,11 @@ with st.expander("Configuration", expanded=(active is None)):
         capital = st.number_input("Capital de depart ($)", min_value=500, max_value=10_000_000,
                                    value=10_000, step=500, key="cfg_capital")
     with c2:
-        symbols = st.multiselect("Actions NASDAQ", NASDAQ_TICKERS,
-                                   default=[s for s in DEFAULT_PICKS if s in NASDAQ_TICKERS],
+        symbols = st.multiselect("Actions a surveiller", ALL_TICKERS,
+                                   default=[s for s in DEFAULT_PICKS if s in ALL_TICKERS],
+                                   format_func=lambda s: TICKER_DISPLAY.get(s, s),
                                    key="cfg_symbols")
-        custom = st.text_input("Ajouter un ticker", placeholder="ex: COIN, ABNB, RIVN", key="cfg_custom")
+        custom = st.text_input("Ajouter un ticker", placeholder="ex: COIN, ABNB, MC.PA", key="cfg_custom")
         if custom:
             for t in [x.strip().upper() for x in custom.split(",") if x.strip()]:
                 if t not in symbols:
@@ -250,8 +258,8 @@ if active is None:
         <div class="tf-empty-icon">1</div>
         <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">Comment ca marche ?</div>
         <div style="max-width:500px;margin:0.5rem auto;color:#8B949E;line-height:1.6;">
-            <b>1.</b> Choisissez votre capital de depart<br>
-            <b>2.</b> Selectionnez les actions NASDAQ que le bot va surveiller<br>
+            <b>1.</b> Choisissez votre capital de depart (en euros)<br>
+            <b>2.</b> Selectionnez les actions que le bot va surveiller<br>
             <b>3.</b> Cliquez <b>Demarrer le bot</b> — il analyse le marche et trade automatiquement<br><br>
             Le score va de <span style="color:#FF4B6E;">0 (vendre)</span> a
             <span style="color:#00C896;">1 (acheter)</span>. Quand le score depasse
@@ -334,7 +342,7 @@ pnl_cls = pnl_class(pnl)
 st.markdown(f"""
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:1.5rem;">
     <div class="tf-metric">
-        <div class="tf-metric-value ${pnl_cls}" style="color:{pnl_c}">${total_value:,.2f}</div>
+        <div class="tf-metric-value ${pnl_cls}" style="color:{pnl_c}">{total_value:,.2f} €</div>
         <div class="tf-metric-label">Valeur totale</div>
     </div>
     <div class="tf-metric">
@@ -342,7 +350,7 @@ st.markdown(f"""
         <div class="tf-metric-label">Rendement</div>
     </div>
     <div class="tf-metric">
-        <div class="tf-metric-value">${cash:,.2f}</div>
+        <div class="tf-metric-value">{cash:,.2f} €</div>
         <div class="tf-metric-label">Cash disponible</div>
     </div>
     <div class="tf-metric">
@@ -398,7 +406,7 @@ with col_chart:
             name="Valeur",
         ))
         fig.add_hline(y=initial_cap, line_dash="dash", line_color="rgba(255,255,255,0.2)",
-                       annotation_text=f"Capital ${initial_cap:,.0f}",
+                       annotation_text=f"Capital {initial_cap:,.0f} €",
                        annotation_font_color="#8B949E", annotation_font_size=11)
         fig.update_layout(
             template="plotly_dark", paper_bgcolor="#111418", plot_bgcolor="#111418",
@@ -450,13 +458,15 @@ else:
         side = row.get("side", "")
         sym = row.get("symbol", "")
         qty = f"{row.get('quantity', 0):.4f}" if pd.notna(row.get("quantity")) else ""
-        price = f"${row.get('price', 0):.2f}" if pd.notna(row.get("price")) else ""
+        price_val = row.get("price", 0)
+        currency = get_currency(sym)
+        price = format_price(price_val, currency) if pd.notna(price_val) else ""
         pnl_val = row.get("pnl", 0)
-        pnl_str = f"${pnl_val:+,.2f}" if pd.notna(pnl_val) and side == "SELL" else ""
+        pnl_str = format_price_sign(pnl_val, currency) if pd.notna(pnl_val) and side == "SELL" else ""
         reason = row.get("reason", "")
         if reason and len(reason) > 60:
             reason = reason[:57] + "..."
-        html_rows += trade_row_html(t, side, sym, qty, price, pnl_str, reason)
+        html_rows += trade_row_html(t, side, sym, qty, price, pnl_str, reason, currency)
 
     st.markdown(f"""
     <div style="border:1px solid #1E2530;border-radius:12px;overflow:hidden;">

@@ -1,123 +1,262 @@
 """
-TradeFlow — NASDAQ Stock List
-Fetches and caches the full list of NASDAQ-listed tickers.
+TradeFlow — Stock List with Company Names
+Provides ticker → (company name, currency) mapping.
+Fetches from yfinance, falls back to a curated list.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from functools import lru_cache
 from pathlib import Path
 
-import pandas as pd
-
 logger = logging.getLogger(__name__)
 
-# Fallback list of major NASDAQ stocks by market cap (used if fetch fails)
-TOP_NASDAQ = [
-    # Mega cap
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "GOOGL", "META", "TSLA",
-    # Large cap
-    "AVGO", "COST", "NFLX", "AMD", "CRM", "ADBE", "PEP", "CSCO",
-    "INTC", "CMCSA", "TXN", "QCOM", "SBUX", "AMGN", "VRTX",
-    "BKNG", "ISRG", "REGN", "FISV", "GILD", "ADP", "CSX", "MU",
-    "LRCX", "PANW", "KLAC", "SNPS", "MCHP", "CDW", "MAR", "MRVL",
-    "ORLY", "FTNT", "MNST", "DLTR", "CPRT", "CTAS", "FAST",
-    "IDXX", "BIIB", "VRSK", "ILMN", "CEG", "WDAY", "XEL", "EXC",
-    "WBA", "MDLZ", "KDP", "ROST", "CHTR", "PYPL",
-    # Tech growth
-    "ABNB", "ZS", "DDOG", "CRWD", "NET", "AXON", "MELI", "TEAM",
-    "MDB", "PSTG", "HUBS", "OKTA", "SNOW", "PLTR", "RBLX", "U",
-    "COIN", "SHOP", "MSTR", "SIRI", "LCID", "RIVN", "NIO",
-    # Semis & hardware
-    "ON", "MRAM", "SWKS", "QRVO", "SMCI", "MPWR", "POWI",
-    # Biotech & pharma
-    "MRNA", "BNTX", "VTRS", "TECH", "ALKS", "DXCM", "ICLR",
-    # Fintech & payments
-    "SQ", "PATH", "AFRM", "UPST", "HOOD",
-    # Energy & industrials
-    "ENPH", "SEDG", "FSLR", "GEHC",
-    # Consumer
-    "LULU", "DLTH", "BURL", "TGT",
-    # Crypto-adjacent
-    "MSTR", "RIOT", "CLSK", "MARA",
-    # Other notable NASDAQ
-    "PCAR", "FSLR", "VRSK", "EXC", "XEL",
-]
+# Curated list: ticker → (company name, currency)
+# Covers NASDAQ + major European exchanges (Euronext Paris, etc.)
+STOCK_INFO: dict[str, tuple[str, str]] = {
+    # ── Mega cap NASDAQ ──
+    "AAPL":   ("Apple", "USD"),
+    "MSFT":   ("Microsoft", "USD"),
+    "NVDA":   ("NVIDIA", "USD"),
+    "AMZN":   ("Amazon", "USD"),
+    "GOOG":   ("Alphabet", "USD"),
+    "GOOGL":  ("Alphabet", "USD"),
+    "META":   ("Meta Platforms", "USD"),
+    "TSLA":   ("Tesla", "USD"),
+    # ── Large cap NASDAQ ──
+    "AVGO":   ("Broadcom", "USD"),
+    "COST":   ("Costco", "USD"),
+    "NFLX":   ("Netflix", "USD"),
+    "AMD":    ("AMD", "USD"),
+    "CRM":    ("Salesforce", "USD"),
+    "ADBE":   ("Adobe", "USD"),
+    "PEP":    ("PepsiCo", "USD"),
+    "CSCO":   ("Cisco", "USD"),
+    "INTC":   ("Intel", "USD"),
+    "CMCSA":  ("Comcast", "USD"),
+    "TXN":    ("Texas Instruments", "USD"),
+    "QCOM":   ("Qualcomm", "USD"),
+    "SBUX":   ("Starbucks", "USD"),
+    "AMGN":   ("Amgen", "USD"),
+    "VRTX":   ("Vertex Pharma", "USD"),
+    "BKNG":   ("Booking Holdings", "USD"),
+    "ISRG":   ("Intuitive Surgical", "USD"),
+    "REGN":   ("Regeneron", "USD"),
+    "FISV":   ("Fiserv", "USD"),
+    "GILD":   ("Gilead Sciences", "USD"),
+    "ADP":    ("ADP", "USD"),
+    "CSX":    ("CSX", "USD"),
+    "MU":     ("Micron", "USD"),
+    "LRCX":   ("Lam Research", "USD"),
+    "PANW":   ("Palo Alto Networks", "USD"),
+    "KLAC":   ("KLA Corporation", "USD"),
+    "SNPS":   ("Synopsys", "USD"),
+    "MCHP":   ("Microchip Tech", "USD"),
+    "CDW":    ("CDW", "USD"),
+    "MAR":    ("Marriott", "USD"),
+    "MRVL":   ("Marvell Tech", "USD"),
+    "ORLY":   ("O'Reilly Auto", "USD"),
+    "FTNT":   ("Fortinet", "USD"),
+    "MNST":   ("Monster Beverage", "USD"),
+    "DLTR":   ("Dollar Tree", "USD"),
+    "CPRT":   ("Copart", "USD"),
+    "CTAS":   ("Cintas", "USD"),
+    "FAST":   ("Fastenal", "USD"),
+    "IDXX":   ("IDEXX Labs", "USD"),
+    "BIIB":   ("Biogen", "USD"),
+    "VRSK":   ("Verisk Analytics", "USD"),
+    "ILMN":   ("Illumina", "USD"),
+    "CEG":    ("Constellation Energy", "USD"),
+    "WDAY":   ("Workday", "USD"),
+    "XEL":    ("Xcel Energy", "USD"),
+    "EXC":    ("Exelon", "USD"),
+    "WBA":    ("Walgreens", "USD"),
+    "MDLZ":   ("Mondelez", "USD"),
+    "KDP":    ("Keurig Dr Pepper", "USD"),
+    "ROST":   ("Ross Stores", "USD"),
+    "CHTR":   ("Charter Comm.", "USD"),
+    "PYPL":   ("PayPal", "USD"),
+    # ── Tech growth ──
+    "ABNB":   ("Airbnb", "USD"),
+    "ZS":     ("Zscaler", "USD"),
+    "DDOG":   ("Datadog", "USD"),
+    "CRWD":   ("CrowdStrike", "USD"),
+    "NET":    ("Cloudflare", "USD"),
+    "AXON":   ("Axon Enterprise", "USD"),
+    "MELI":   ("MercadoLibre", "USD"),
+    "TEAM":   ("Atlassian", "USD"),
+    "MDB":    ("MongoDB", "USD"),
+    "PSTG":   ("Pure Storage", "USD"),
+    "HUBS":   ("HubSpot", "USD"),
+    "OKTA":   ("Okta", "USD"),
+    "SNOW":   ("Snowflake", "USD"),
+    "PLTR":   ("Palantir", "USD"),
+    "RBLX":   ("Roblox", "USD"),
+    "U":      ("Unity Software", "USD"),
+    "COIN":   ("Coinbase", "USD"),
+    "SHOP":   ("Shopify", "USD"),
+    "MSTR":  ("MicroStrategy", "USD"),
+    "SIRI":   ("SiriusXM", "USD"),
+    "LCID":   ("Lucid Motors", "USD"),
+    "RIVN":   ("Rivian", "USD"),
+    "NIO":    ("NIO", "USD"),
+    # ── Semis & hardware ──
+    "ON":     ("ON Semiconductor", "USD"),
+    "SWKS":   ("Skyworks", "USD"),
+    "QRVO":   ("Qorvo", "USD"),
+    "SMCI":   ("Super Micro", "USD"),
+    "MRAM":   ("Everspin", "USD"),
+    "MPWR":   ("Monolithic Power", "USD"),
+    "POWI":   ("Power Integrations", "USD"),
+    # ── Biotech & pharma ──
+    "MRNA":   ("Moderna", "USD"),
+    "BNTX":   ("BioNTech", "USD"),
+    "VTRS":   ("Viatris", "USD"),
+    "DXCM":   ("Dexcom", "USD"),
+    "ICLR":   ("Icon PLC", "USD"),
+    "ALKS":   ("Alkermes", "USD"),
+    # ── Fintech & payments ──
+    "SQ":     ("Block", "USD"),
+    "PATH":   ("UiPath", "USD"),
+    "AFRM":   ("Affirm", "USD"),
+    "UPST":   ("Upstart", "USD"),
+    "HOOD":   ("Robinhood", "USD"),
+    # ── Energy & industrials ──
+    "ENPH":   ("Enphase Energy", "USD"),
+    "SEDG":   ("SolarEdge", "USD"),
+    "FSLR":   ("First Solar", "USD"),
+    "GEHC":   ("GE HealthCare", "USD"),
+    "PCAR":   ("PACCAR", "USD"),
+    # ── European — Euronext Paris ──
+    "MC.PA":  ("LVMH", "EUR"),
+    "TTE.PA": ("TotalEnergies", "EUR"),
+    "AIR.PA": ("Airbus", "EUR"),
+    "SAN.PA": ("Sanofi", "EUR"),
+    "BNP.PA": ("BNP Paribas", "EUR"),
+    "ORA.PA": ("Orange", "EUR"),
+    "EN.PA":  ("Engie", "EUR"),
+    "RMS.PA": ("Hermes", "EUR"),
+    "OR.PA":  ("L'Oreal", "EUR"),
+    "CAP.PA": ("Capgemini", "EUR"),
+    "SU.PA":  ("Schneider Electric", "EUR"),
+    "ALO.PA": ("Alstom", "EUR"),
+    "GLE.PA": ("Societe Generale", "EUR"),
+    "ACA.PA": ("Credit Agricole", "EUR"),
+    "DG.PA":  ("Vinci", "EUR"),
+    "SGO.PA": ("Saint-Gobain", "EUR"),
+    # ── European — Others ──
+    "SAP.DE": ("SAP", "EUR"),
+    "SIE.DE": ("Siemens", "EUR"),
+    "ASML":   ("ASML", "EUR"),
+    "NVO":    ("Novo Nordisk", "DKK"),
+}
 
-CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "nasdaq_tickers.csv"
+CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "stock_names.json"
 
 
-@lru_cache(maxsize=1)
-def get_nasdaq_tickers() -> list[str]:
+def get_stock_info(symbol: str) -> tuple[str, str]:
     """
-    Return the full list of NASDAQ tickers.
-    Tries to fetch from NASDAQ, falls back to TOP_NASDAQ.
+    Return (company_name, currency) for a ticker symbol.
+    Uses local dictionary first, then falls back to yfinance, then to symbol itself.
     """
-    # Try cache file first
-    if CACHE_PATH.exists():
-        try:
-            df = pd.read_csv(CACHE_PATH)
-            if "Symbol" in df.columns and len(df) > 100:
-                tickers = df["Symbol"].dropna().str.strip().str.upper().tolist()
-                logger.info("Loaded %d NASDAQ tickers from cache", len(tickers))
-                return tickers
-        except Exception:
-            pass
+    # Check local dictionary first
+    if symbol in STOCK_INFO:
+        return STOCK_INFO[symbol]
 
-    # Try fetching from NASDAQ FTP
-    try:
-        url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000&exchange=NASDAQ"
-        import requests
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            rows = data.get("data", {}).get("rows", [])
-            if rows:
-                tickers = [r["symbol"] for r in rows if r.get("symbol")]
-                logger.info("Fetched %d NASDAQ tickers from API", len(tickers))
-                # Cache to file
-                CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame({"Symbol": tickers}).to_csv(CACHE_PATH, index=False)
-                return tickers
-    except Exception as exc:
-        logger.warning("NASDAQ API fetch failed: %s", exc)
+    # Try cached file
+    cached = _load_cache()
+    if symbol in cached:
+        return tuple(cached[symbol])
 
-    # Try yfinance approach
+    # Try yfinance
     try:
         import yfinance as yf
-        # Get NASDAQ 100 tickers as a reasonable alternative
-        nasdaq_url = "https://en.wikipedia.org/wiki/Nasdaq-100"
-        tables = pd.read_html(nasdaq_url)
-        for table in tables:
-            if "Ticker" in table.columns:
-                tickers = table["Ticker"].dropna().str.strip().str.upper().tolist()
-                logger.info("Fetched %d NASDAQ-100 tickers from Wikipedia", len(tickers))
-                CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame({"Symbol": tickers}).to_csv(CACHE_PATH, index=False)
-                return tickers
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        name = info.get("shortName") or info.get("longName") or symbol
+        currency = info.get("currency", "USD")
+        result = (name, currency)
+        # Cache it
+        cached[symbol] = list(result)
+        _save_cache(cached)
+        return result
     except Exception as exc:
-        logger.warning("Wikipedia NASDAQ fetch failed: %s", exc)
-
-    logger.info("Using fallback NASDAQ list (%d tickers)", len(TOP_NASDAQ))
-    # Deduplicate while preserving order
-    seen = set()
-    unique = []
-    for t in TOP_NASDAQ:
-        if t not in seen:
-            seen.add(t)
-            unique.append(t)
-    return unique
+        logger.warning("yfinance lookup failed for %s: %s", symbol, exc)
+        return (symbol, "USD")
 
 
-def search_tickers(query: str, limit: int = 20) -> list[str]:
-    """Search NASDAQ tickers by prefix. Returns up to `limit` matches."""
+def get_display_name(symbol: str) -> str:
+    """Return 'Company Name (TICKER)' for display."""
+    name, _ = get_stock_info(symbol)
+    if name == symbol:
+        return symbol
+    return f"{name} ({symbol})"
+
+
+def get_currency(symbol: str) -> str:
+    """Return the currency for a ticker (EUR, USD, etc.)."""
+    _, currency = get_stock_info(symbol)
+    return currency
+
+
+def format_price(value: float, currency: str = "EUR") -> str:
+    """Format a price value with the correct currency symbol."""
+    if currency == "EUR":
+        return f"{value:,.2f} €"
+    if currency == "GBP":
+        return f"£{value:,.2f}"
+    return f"${value:,.2f}"
+
+
+def format_price_sign(value: float, currency: str = "EUR") -> str:
+    """Format a price with sign (+/-) and correct currency symbol."""
+    sign = "+" if value >= 0 else ""
+    if currency == "EUR":
+        return f"{sign}{value:,.2f} €"
+    if currency == "GBP":
+        return f"{sign}£{value:,.2f}"
+    return f"{sign}${value:,.2f}"
+
+
+def _load_cache() -> dict:
+    """Load cached stock names from JSON file."""
+    if CACHE_PATH.exists():
+        try:
+            with open(CACHE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_cache(data: dict) -> None:
+    """Save cached stock names to JSON file."""
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning("Failed to save stock name cache: %s", exc)
+
+
+def get_all_tickers() -> list[str]:
+    """Return all available tickers (from STOCK_INFO dictionary)."""
+    return list(STOCK_INFO.keys())
+
+
+def search_tickers(query: str, limit: int = 30) -> list[str]:
+    """Search tickers by name or symbol prefix. Returns up to `limit` matches."""
     query = query.strip().upper()
     if not query:
-        return TOP_NASDAQ[:limit]
-    all_tickers = get_nasdaq_tickers()
-    matches = [t for t in all_tickers if t.startswith(query)]
+        return list(STOCK_INFO.keys())[:limit]
+    matches = []
+    for sym, (name, _) in STOCK_INFO.items():
+        if sym.startswith(query) or name.upper().startswith(query):
+            matches.append(sym)
     if not matches:
-        matches = [t for t in all_tickers if query in t]
+        for sym, (name, _) in STOCK_INFO.items():
+            if query in sym or query in name.upper():
+                matches.append(sym)
     return matches[:limit]
