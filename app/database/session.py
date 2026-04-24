@@ -66,12 +66,37 @@ _engine: Engine = create_db_engine()
 _SessionFactory: sessionmaker = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
 
 
+def _migrate(engine: Engine) -> None:
+    """Apply incremental ALTER TABLE migrations for columns added after initial release."""
+    migrations = [
+        # v2: live trading columns on sim_runs
+        ("sim_runs", "is_live",      "INTEGER NOT NULL DEFAULT 0"),
+        ("sim_runs", "status",       "VARCHAR(16) NOT NULL DEFAULT 'completed'"),
+        ("sim_runs", "last_tick_at", "DATETIME"),
+        # v2: reason column on trades
+        ("trades",   "reason",       "TEXT DEFAULT ''"),
+    ]
+    with engine.connect() as conn:
+        for table, column, col_def in migrations:
+            try:
+                conn.execute(
+                    __import__("sqlalchemy").text(
+                        f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"
+                    )
+                )
+                conn.commit()
+            except Exception:
+                # Column already exists — ignore
+                pass
+
+
 def init_database() -> None:
     """
-    Initialize the database by creating all tables if they don't exist.
-    Safe to call multiple times (idempotent).
+    Initialize the database by creating all tables if they don't exist,
+    then apply any pending column migrations. Safe to call multiple times.
     """
     Base.metadata.create_all(_engine)
+    _migrate(_engine)
 
 
 def get_session() -> Session:
