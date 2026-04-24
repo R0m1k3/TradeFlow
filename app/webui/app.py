@@ -68,35 +68,27 @@ def gauge_svg(score: float, size: int = 120) -> str:
     circumference = 2 * 3.14159 * r
     dashoffset = circumference * (1 - score)
     label = signal_label(score)
-    return f"""
-    <svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" class="tf-gauge">
-        <circle class="tf-gauge-bg" cx="{cx}" cy="{cy}" r="{r}"
-                stroke-dasharray="{circumference}" stroke-dashoffset="0"
-                transform="rotate(-90 {cx} {cy})"/>
-        <circle class="tf-gauge-fill" cx="{cx}" cy="{cy}" r="{r}"
-                stroke="{c}" stroke-dasharray="{circumference}" stroke-dashoffset="{dashoffset}"
-                transform="rotate(-90 {cx} {cy})"/>
-        <text x="{cx}" y="{cy - 6}" text-anchor="middle" dominant-baseline="middle"
-              fill="{c}" font-size="22" font-weight="800" font-family="Inter,sans-serif">{score:.2f}</text>
-        <text x="{cx}" y="{cy + 14}" text-anchor="middle" dominant-baseline="middle"
-              fill="{c}" font-size="10" font-weight="600" font-family="Inter,sans-serif">{label}</text>
-    </svg>"""
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" class="tf-gauge">'
+        f'<circle class="tf-gauge-bg" cx="{cx}" cy="{cy}" r="{r}" stroke-dasharray="{circumference}" stroke-dashoffset="0" transform="rotate(-90 {cx} {cy})"/>'
+        f'<circle class="tf-gauge-fill" cx="{cx}" cy="{cy}" r="{r}" stroke="{c}" stroke-dasharray="{circumference}" stroke-dashoffset="{dashoffset}" transform="rotate(-90 {cx} {cy})"/>'
+        f'<text x="{cx}" y="{cy - 6}" text-anchor="middle" dominant-baseline="middle" fill="{c}" font-size="22" font-weight="800" font-family="Inter,sans-serif">{score:.2f}</text>'
+        f'<text x="{cx}" y="{cy + 14}" text-anchor="middle" dominant-baseline="middle" fill="{c}" font-size="10" font-weight="600" font-family="Inter,sans-serif">{label}</text>'
+        f'</svg>'
+    )
 
 
 def sub_bar_html(label: str, value: float, explanation: str = "") -> str:
     c = score_color(value)
     pct = value * 100
     expl_text = f'<div class="tf-explain" style="font-size:0.7rem;margin-top:2px;">{explanation}</div>' if explanation else ""
-    return f"""
-    <div class="tf-sub-bar">
-        <div class="tf-sub-bar-label">
-            <span>{label}</span><span style="color:{c};font-weight:700;">{value:.2f}</span>
-        </div>
-        <div class="tf-sub-bar-track">
-            <div class="tf-sub-bar-fill" style="width:{pct}%;background:{c};"></div>
-        </div>
-        {expl_text}
-    </div>"""
+    return (
+        f'<div class="tf-sub-bar">'
+        f'<div class="tf-sub-bar-label"><span>{label}</span><span style="color:{c};font-weight:700;">{value:.2f}</span></div>'
+        f'<div class="tf-sub-bar-track"><div class="tf-sub-bar-fill" style="width:{pct}%;background:{c};"></div></div>'
+        f'{expl_text}'
+        f'</div>'
+    )
 
 
 def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = False) -> str:
@@ -110,31 +102,33 @@ def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = F
     price_str = format_price(price, currency)
     detail_html = ""
     if show_detail:
-        detail_html = f"""
-        <div style="border-top:1px solid #1E2530;margin-top:12px;padding-top:12px;text-align:left;">
-            {sub_bar_html("Graphiques", score_data.technical, explain_sub_score("Technique", score_data.technical))}
-            {sub_bar_html("Sentiment", score_data.sentiment, explain_sub_score("Sentiment", score_data.sentiment))}
-            {sub_bar_html("Volume", score_data.momentum, explain_sub_score("Momentum", score_data.momentum))}
-            <div style="border-top:1px solid #1E2530;margin-top:8px;padding-top:8px;">
-                {sub_bar_html("RSI", score_data.rsi_score)}
-                {sub_bar_html("MACD", score_data.macd_score)}
-                {sub_bar_html("Bollinger", score_data.bollinger_score)}
-                {sub_bar_html("Tendance", score_data.sma_score)}
-            </div>
-            <div style="display:flex;gap:12px;justify-content:center;margin-top:8px;font-size:0.7rem;color:#8B949E;">
-                <span>Fear & Greed: {score_data.fear_greed:.2f}</span>
-                <span>News: {score_data.news_sentiment:.2f}</span>
-            </div>
-        </div>"""
-    return f"""
-    <div class="tf-card {cc}">
-        <div class="tf-card-symbol">{display_name}</div>
-        <div class="tf-card-price">{price_str}</div>
-        {gauge_svg(s, size=120)}
-        <div class="tf-badge {badge_cls}">{badge_label}</div>
-        <div class="tf-explain">{explain}</div>
-        {detail_html}
-    </div>"""
+        detail_html = (
+            f'<div style="border-top:1px solid #1E2530;margin-top:12px;padding-top:12px;text-align:left;">'
+            f'{sub_bar_html("Graphiques", score_data.technical, explain_sub_score("Technique", score_data.technical))}'
+            f'{sub_bar_html("Sentiment", score_data.sentiment, explain_sub_score("Sentiment", score_data.sentiment))}'
+            f'{sub_bar_html("Volume", score_data.momentum, explain_sub_score("Momentum", score_data.momentum))}'
+            f'<div style="border-top:1px solid #1E2530;margin-top:8px;padding-top:8px;">'
+            f'{sub_bar_html("RSI", score_data.rsi_score)}'
+            f'{sub_bar_html("MACD", score_data.macd_score)}'
+            f'{sub_bar_html("Bollinger", score_data.bollinger_score)}'
+            f'{sub_bar_html("Tendance", score_data.sma_score)}'
+            f'</div>'
+            f'<div style="display:flex;gap:12px;justify-content:center;margin-top:8px;font-size:0.7rem;color:#8B949E;">'
+            f'<span>Fear &amp; Greed: {score_data.fear_greed:.2f}</span>'
+            f'<span>News: {score_data.news_sentiment:.2f}</span>'
+            f'</div>'
+            f'</div>'
+        )
+    return (
+        f'<div class="tf-card {cc}">'
+        f'<div class="tf-card-symbol">{display_name}</div>'
+        f'<div class="tf-card-price">{price_str}</div>'
+        f'{gauge_svg(s, size=120)}'
+        f'<div class="tf-badge {badge_cls}">{badge_label}</div>'
+        f'<div class="tf-explain">{explain}</div>'
+        f'{detail_html}'
+        f'</div>'
+    )
 
 
 def position_card_html(symbol: str, qty: float, avg: float, cur: float) -> str:
@@ -144,14 +138,15 @@ def position_card_html(symbol: str, qty: float, avg: float, cur: float) -> str:
     display_name = get_display_name(symbol)
     currency = get_currency(symbol)
     pnl_str = format_price_sign(unrealized, currency)
-    return f"""
-    <div class="tf-position {cls}">
-        <div>
-            <div class="tf-position-symbol">{display_name}</div>
-            <div class="tf-position-detail">{qty:.4f} actions &middot; {format_price(avg, currency)} &rarr; {format_price(cur, currency)}</div>
-        </div>
-        <div class="tf-position-pnl {cls}" style="color:{c};font-size:1rem;">{pnl_str}</div>
-    </div>"""
+    return (
+        f'<div class="tf-position {cls}">'
+        f'<div>'
+        f'<div class="tf-position-symbol">{display_name}</div>'
+        f'<div class="tf-position-detail">{qty:.4f} actions &middot; {format_price(avg, currency)} &rarr; {format_price(cur, currency)}</div>'
+        f'</div>'
+        f'<div class="tf-position-pnl {cls}" style="color:{c};font-size:1rem;">{pnl_str}</div>'
+        f'</div>'
+    )
 
 
 def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl: str = "", reason: str = "", currency: str = "EUR") -> str:
@@ -164,30 +159,32 @@ def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl:
         c = pnl_color(val)
         pnl_html = f'<span class="tf-trade-pnl {pnl_class(val)}" style="color:{c}">{pnl}</span>'
     reason_html = f'<span style="color:#8B949E;font-size:0.75rem;margin-left:auto;">{reason}</span>' if reason else ""
-    return f"""
-    <div class="tf-trade-row">
-        <span class="tf-trade-time">{time}</span>
-        <span class="{side_cls}">{side_label}</span>
-        <span class="tf-trade-symbol">{display_name}</span>
-        <span class="tf-trade-qty">{qty}</span>
-        <span class="tf-trade-price">{price}</span>
-        {pnl_html}
-        {reason_html}
-    </div>"""
+    return (
+        f'<div class="tf-trade-row">'
+        f'<span class="tf-trade-time">{time}</span>'
+        f'<span class="{side_cls}">{side_label}</span>'
+        f'<span class="tf-trade-symbol">{display_name}</span>'
+        f'<span class="tf-trade-qty">{qty}</span>'
+        f'<span class="tf-trade-price">{price}</span>'
+        f'{pnl_html}'
+        f'{reason_html}'
+        f'</div>'
+    )
 
 
 # ── Header with gear icon ──────────────────────────────────────────────────────
 
 active = get_active_live_session()
 
-st.markdown("""
-<div class="tf-header">
-    <div style="display:flex;align-items:center;">
-        <span class="tf-brand">TradeFlow</span>
-        <span class="tf-brand-sub">Analyse automatique du marche</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+    '<div class="tf-header">'
+    '<div style="display:flex;align-items:center;">'
+    '<span class="tf-brand">TradeFlow</span>'
+    '<span class="tf-brand-sub">Analyse automatique du marche</span>'
+    '</div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
 # Gear icon button for config modal
 col_title, col_gear = st.columns([10, 1])
@@ -208,13 +205,14 @@ def market_card_html(status: dict) -> str:
     badge_label = "OUVERT" if is_open else "FERME"
     price = status.get("price")
     price_str = f"{price:,.2f} pts" if price is not None else "—"
-    return f"""
-    <div class="tf-market-card {state_cls}">
-        <div class="tf-market-name">{status['name']}</div>
-        <div class="tf-market-index">{status['index_name']}</div>
-        <div class="tf-market-price">{price_str}</div>
-        <div class="{badge_cls}">{badge_label}</div>
-    </div>"""
+    return (
+        f'<div class="tf-market-card {state_cls}">'
+        f'<div class="tf-market-name">{status["name"]}</div>'
+        f'<div class="tf-market-index">{status["index_name"]}</div>'
+        f'<div class="tf-market-price">{price_str}</div>'
+        f'<div class="{badge_cls}">{badge_label}</div>'
+        f'</div>'
+    )
 
 
 market_statuses = load_market_statuses()
@@ -233,16 +231,16 @@ else:
     summary_color = "#8B949E"
     summary_text = f"Marches fermes — ouverture dans ~{wait_min} min"
 
-st.markdown(f"""
-<div class="tf-market-grid">
-    {markets_html}
-</div>
-<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;">
-    <div style="width:8px;height:8px;background:{summary_color};border-radius:50%;{'animation:tf-pulse 2s infinite;' if any_open else ''}"></div>
-    <span style="color:{summary_color};font-size:0.85rem;font-weight:600;">{summary_text}</span>
-</div>
-<style>@keyframes tf-pulse{{0%,100%{{opacity:1}}50%{{opacity:0.3}}}}</style>
-""", unsafe_allow_html=True)
+pulse_anim = "animation:tf-pulse 2s infinite;" if any_open else ""
+st.markdown(
+    f'<div class="tf-market-grid">{markets_html}</div>'
+    f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;">'
+    f'<div style="width:8px;height:8px;background:{summary_color};border-radius:50%;{pulse_anim}"></div>'
+    f'<span style="color:{summary_color};font-size:0.85rem;font-weight:600;">{summary_text}</span>'
+    f'</div>'
+    f'<style>@keyframes tf-pulse{{0%,100%{{opacity:1}}50%{{opacity:0.3}}}}</style>',
+    unsafe_allow_html=True,
+)
 
 # ── Config modal (opened by gear icon) ─────────────────────────────────────────
 
@@ -319,19 +317,19 @@ if active is None:
                     pass
 
     st.markdown("---")
-    st.markdown("""
-    <div class="tf-empty">
-        <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">Comment ca marche ?</div>
-        <div style="max-width:500px;margin:0.5rem auto;color:#8B949E;line-height:1.6;">
-            <b>1.</b> Cliquez sur ⚙️ en haut a droite pour configurer le capital<br>
-            <b>2.</b> Le bot analyse automatiquement toutes les actions disponibles<br>
-            <b>3.</b> Cliquez <b>Demarrer le bot</b> — il trade automatiquement<br><br>
-            Le score va de <span style="color:#FF4B6E;">0 (vendre)</span> a
-            <span style="color:#00C896;">1 (acheter)</span>. Quand le score depasse
-            <b>0.70</b>, le bot achete. Quand il passe sous <b>0.30</b>, il vend.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="tf-empty">'
+        '<div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">Comment ca marche ?</div>'
+        '<div style="max-width:500px;margin:0.5rem auto;color:#8B949E;line-height:1.6;">'
+        '<b>1.</b> Cliquez sur ⚙️ en haut a droite pour configurer le capital<br>'
+        '<b>2.</b> Le bot analyse automatiquement toutes les actions disponibles<br>'
+        '<b>3.</b> Cliquez <b>Demarrer le bot</b> — il trade automatiquement<br><br>'
+        'Le score va de <span style="color:#FF4B6E;">0 (vendre)</span> a '
+        '<span style="color:#00C896;">1 (acheter)</span>. Quand le score depasse '
+        '<b>0.70</b>, le bot achete. Quand il passe sous <b>0.30</b>, il vend.'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
     st.stop()
 
 # ── Active session ────────────────────────────────────────────────────────────
@@ -341,16 +339,18 @@ symbols_live = [s.strip() for s in active["symbol"].split(",")]
 initial_cap = active["initial_capital"]
 last_tick = active.get("last_tick_at")
 
-st.markdown(f"""
-<div class="tf-status">
-    <div class="tf-status-dot"></div>
-    <span class="tf-status-text">Bot actif</span>
-    <span class="tf-status-detail">Session #{run_id}</span>
-    <span class="tf-status-detail">{len(symbols_live)} actions</span>
-    <span class="tf-status-detail">{active['interval']}</span>
-    {"<span class='tf-status-detail'>Derniere analyse: " + (last_tick[:19].replace('T',' ') if last_tick else '—') + "</span>" if last_tick else ""}
-</div>
-""", unsafe_allow_html=True)
+last_tick_html = f"<span class='tf-status-detail'>Derniere analyse: {last_tick[:19].replace('T',' ')}</span>" if last_tick else ""
+st.markdown(
+    f'<div class="tf-status">'
+    f'<div class="tf-status-dot"></div>'
+    f'<span class="tf-status-text">Bot actif</span>'
+    f'<span class="tf-status-detail">Session #{run_id}</span>'
+    f'<span class="tf-status-detail">{len(symbols_live)} actions</span>'
+    f'<span class="tf-status-detail">{active["interval"]}</span>'
+    f'{last_tick_html}'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 # ── Load data ──────────────────────────────────────────────────────────────────
 
@@ -404,26 +404,15 @@ n_trades = len(trades_df) if not trades_df.empty else 0
 
 pnl_c = pnl_color(pnl)
 pnl_cls = pnl_class(pnl)
-st.markdown(f"""
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:1.5rem;">
-    <div class="tf-metric">
-        <div class="tf-metric-value ${pnl_cls}" style="color:{pnl_c}">{total_value:,.2f} €</div>
-        <div class="tf-metric-label">Valeur totale</div>
-    </div>
-    <div class="tf-metric">
-        <div class="tf-metric-value ${pnl_cls}" style="color:{pnl_c}">{pnl_pct:+.2f}%</div>
-        <div class="tf-metric-label">Rendement</div>
-    </div>
-    <div class="tf-metric">
-        <div class="tf-metric-value">{cash:,.2f} €</div>
-        <div class="tf-metric-label">Cash disponible</div>
-    </div>
-    <div class="tf-metric">
-        <div class="tf-metric-value">{n_trades}</div>
-        <div class="tf-metric-label">Trades executes</div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+    f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:1.5rem;">'
+    f'<div class="tf-metric"><div class="tf-metric-value" style="color:{pnl_c}">{total_value:,.2f} €</div><div class="tf-metric-label">Valeur totale</div></div>'
+    f'<div class="tf-metric"><div class="tf-metric-value" style="color:{pnl_c}">{pnl_pct:+.2f}%</div><div class="tf-metric-label">Rendement</div></div>'
+    f'<div class="tf-metric"><div class="tf-metric-value">{cash:,.2f} €</div><div class="tf-metric-label">Cash disponible</div></div>'
+    f'<div class="tf-metric"><div class="tf-metric-value">{n_trades}</div><div class="tf-metric-label">Trades executes</div></div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 # ── Stock score cards — ALL tickers ─────────────────────────────────────────────
 
@@ -490,11 +479,7 @@ with col_chart:
         fig.update_yaxes(gridcolor="#1E2530", color="#8B949E")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.markdown("""
-        <div class="tf-empty">
-            <div>En attente de la premiere analyse du bot...</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="tf-empty"><div>En attente de la premiere analyse du bot...</div></div>', unsafe_allow_html=True)
 
 with col_pos:
     st.markdown('<div class="tf-section">Positions ouvertes</div>', unsafe_allow_html=True)
@@ -505,11 +490,7 @@ with col_pos:
             cur = pos.get("current_price", avg)
             st.markdown(position_card_html(sym, qty, avg, cur), unsafe_allow_html=True)
     else:
-        st.markdown("""
-        <div class="tf-empty">
-            <div>Aucune position ouverte</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="tf-empty"><div>Aucune position ouverte</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -518,12 +499,13 @@ st.markdown("---")
 st.markdown('<div class="tf-section">Historique des trades</div>', unsafe_allow_html=True)
 
 if trades_df.empty:
-    st.markdown("""
-    <div class="tf-empty">
-        <div>Aucun trade execute pour l'instant</div>
-        <div class="tf-explain">Le bot attend que le score depasse 0.70 pour acheter ou passe sous 0.30 pour vendre</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="tf-empty">'
+        '<div>Aucun trade execute pour l\'instant</div>'
+        '<div class="tf-explain">Le bot attend que le score depasse 0.70 pour acheter ou passe sous 0.30 pour vendre</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 else:
     html_rows = ""
     for _, row in trades_df.head(20).iterrows():
@@ -541,16 +523,14 @@ else:
             reason = reason[:57] + "..."
         html_rows += trade_row_html(t, side, sym, qty, price, pnl_str, reason, currency)
 
-    st.markdown(f"""
-    <div style="border:1px solid #1E2530;border-radius:12px;overflow:hidden;">
-        {html_rows}
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="border:1px solid #1E2530;border-radius:12px;overflow:hidden;">{html_rows}</div>',
+        unsafe_allow_html=True,
+    )
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 
-st.markdown(f"""
-<div class="tf-footer">
-    Flux automatique &middot; Derniere mise a jour: {datetime.now().strftime('%H:%M:%S')}
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+    f'<div class="tf-footer">Flux automatique &middot; Derniere mise a jour: {datetime.now().strftime("%H:%M:%S")}</div>',
+    unsafe_allow_html=True,
+)
