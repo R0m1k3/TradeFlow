@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: tradeflow_app
     ports:
-      - "8000:8000"
+      - "8501:8501"
     volumes:
       - tradeflow_data:/app/data
     environment:
@@ -17,7 +17,7 @@ services:
       - nginx_default
     healthcheck:
       test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+             "import urllib.request; urllib.request.urlopen('http://localhost:8501/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
