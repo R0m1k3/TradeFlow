@@ -119,13 +119,22 @@ def _fetch_from_yfinance(
         if df.index.tz is not None:
             df.index = df.index.tz_convert("UTC").tz_localize(None)
 
-        # Cast all numeric columns to float (avoids numpy dtype issues)
+        # Cast all numeric columns to float
         df = df.astype(float)
-        df = df.dropna()
-        df = df[df["volume"] > 0]  # Remove bars with no volume (market closed)
+        
+        # Soft cleaning: forward fill close price, then infer others if missing
+        df["close"] = df["close"].ffill()
+        df["open"] = df["open"].fillna(df["close"])
+        df["high"] = df["high"].fillna(df["close"])
+        df["low"] = df["low"].fillna(df["close"])
+        df["volume"] = df["volume"].fillna(0)
+
+        # Drop only rows where price is fundamentally missing/invalid
+        df = df.dropna(subset=["close"])
+        df = df[df["close"] > 0]
 
         if df.empty:
-            logger.warning("All bars filtered out for %s [%s] (no volume or all NaN)", symbol, interval)
+            logger.warning("All bars filtered out for %s [%s] (no valid close prices)", symbol, interval)
             return None
 
         _save_to_cache(symbol, interval, df)
