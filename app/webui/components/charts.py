@@ -319,31 +319,45 @@ def _add_trade_markers(
     trades_df: pd.DataFrame,
     row: int,
 ) -> None:
-    """Overlay BUY and SELL markers on the price chart."""
+    """Overlay BUY and SELL markers on the price chart with reason tooltips."""
     buy_trades = trades_df[trades_df["side"] == "BUY"]
     sell_trades = trades_df[trades_df["side"] == "SELL"]
 
+    reason_col = "reason" if "reason" in trades_df.columns else None
+
     if not buy_trades.empty:
+        hover_texts = (
+            ["🟢 ACHAT<br>" + str(r) if r else "🟢 ACHAT" for r in buy_trades[reason_col]]
+            if reason_col else ["🟢 ACHAT"] * len(buy_trades)
+        )
         fig.add_trace(
             go.Scatter(
                 x=pd.to_datetime(buy_trades["timestamp"]),
                 y=buy_trades["price"],
                 mode="markers",
                 name="BUY",
-                marker=dict(symbol="triangle-up", size=12, color="#00C896", line=dict(width=1, color="#fff")),
+                text=hover_texts,
+                hovertemplate="<b>%{text}</b><br>Prix: $%{y:.2f}<br>Date: %{x}<extra></extra>",
+                marker=dict(symbol="triangle-up", size=14, color="#00C896", line=dict(width=1, color="#fff")),
             ),
             row=row,
             col=1,
         )
 
     if not sell_trades.empty:
+        hover_texts = (
+            ["🔴 VENTE<br>" + str(r) if r else "🔴 VENTE" for r in sell_trades[reason_col]]
+            if reason_col else ["🔴 VENTE"] * len(sell_trades)
+        )
         fig.add_trace(
             go.Scatter(
                 x=pd.to_datetime(sell_trades["timestamp"]),
                 y=sell_trades["price"],
                 mode="markers",
                 name="SELL",
-                marker=dict(symbol="triangle-down", size=12, color="#FF4B6E", line=dict(width=1, color="#fff")),
+                text=hover_texts,
+                hovertemplate="<b>%{text}</b><br>Prix: $%{y:.2f}<br>Date: %{x}<extra></extra>",
+                marker=dict(symbol="triangle-down", size=14, color="#FF4B6E", line=dict(width=1, color="#fff")),
             ),
             row=row,
             col=1,

@@ -57,7 +57,7 @@ class RsiStrategy(BaseStrategy):
     def name(self) -> str:
         return f"RSI ({self._period}) [{self._oversold}/{self._overbought}]"
 
-    def generate_signal(self, df: pd.DataFrame, current_idx: int) -> Signal:
+    def generate_signal(self, df: pd.DataFrame, current_idx: int) -> tuple[Signal, str]:
         """
         Evaluate RSI signal at the given bar index.
 
@@ -68,34 +68,42 @@ class RsiStrategy(BaseStrategy):
             current_idx: Current bar index (0-based).
 
         Returns:
-            Signal.BUY, Signal.SELL, or Signal.HOLD.
+            Tuple of (Signal, reason_str).
         """
         rsi_col = f"rsi_{self._period}"
 
         if current_idx < 1:
-            return Signal.HOLD
+            return Signal.HOLD, ""
 
         if rsi_col not in df.columns:
             logger.warning("Missing RSI column '%s'. Run add_rsi() first.", rsi_col)
-            return Signal.HOLD
+            return Signal.HOLD, f"Colonne RSI manquante ({rsi_col})"
 
         rsi_now = df[rsi_col].iloc[current_idx]
         rsi_prev = df[rsi_col].iloc[current_idx - 1]
 
         if pd.isna(rsi_now) or pd.isna(rsi_prev):
-            return Signal.HOLD
+            return Signal.HOLD, ""
 
         # RSI crosses up from below oversold threshold → BUY
         if rsi_prev <= self._oversold and rsi_now > self._oversold:
+            reason = (
+                f"RSI survendu : RSI={rsi_now:.1f} a croisé le seuil {self._oversold} à la hausse "
+                f"(était {rsi_prev:.1f}) — rebond probable"
+            )
             logger.debug("BUY signal at idx=%d (RSI crossover up, RSI=%.2f)", current_idx, rsi_now)
-            return Signal.BUY
+            return Signal.BUY, reason
 
         # RSI crosses down from above overbought threshold → SELL
         if rsi_prev >= self._overbought and rsi_now < self._overbought:
+            reason = (
+                f"RSI suracheté : RSI={rsi_now:.1f} a croisé le seuil {self._overbought} à la baisse "
+                f"(était {rsi_prev:.1f}) — correction probable"
+            )
             logger.debug("SELL signal at idx=%d (RSI crossover down, RSI=%.2f)", current_idx, rsi_now)
-            return Signal.SELL
+            return Signal.SELL, reason
 
-        return Signal.HOLD
+        return Signal.HOLD, ""
 
     def get_params(self) -> dict[str, Any]:
         return {

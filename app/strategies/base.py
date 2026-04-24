@@ -29,7 +29,7 @@ class BaseStrategy(ABC):
     Abstract base class for all TradeFlow trading strategies.
 
     All concrete strategies must implement:
-        - generate_signal(df, current_idx) → Signal
+        - generate_signal(df, current_idx) → tuple[Signal, str]
         - get_params() → dict
         - name property
 
@@ -46,9 +46,10 @@ class BaseStrategy(ABC):
         self,
         df: Any,  # pd.DataFrame — avoid import at base level
         current_idx: int,
-    ) -> Signal:
+    ) -> tuple[Signal, str]:
         """
-        Evaluate the strategy at a specific bar index and return a trading signal.
+        Evaluate the strategy at a specific bar index and return a trading signal
+        along with a human-readable explanation of the decision.
 
         The strategy must only use data up to and including current_idx
         (no look-ahead bias).
@@ -58,7 +59,8 @@ class BaseStrategy(ABC):
             current_idx: Integer position of the current bar in the DataFrame.
 
         Returns:
-            Signal.BUY, Signal.SELL, or Signal.HOLD.
+            Tuple of (Signal, reason) where reason explains why the signal was emitted.
+            Example: (Signal.BUY, "SMA20 (142.50) a croisé au-dessus de SMA50 (140.20)")
         """
 
     @abstractmethod

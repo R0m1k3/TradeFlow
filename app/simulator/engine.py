@@ -182,8 +182,8 @@ class SimulationEngine:
             if progress_callback is not None:
                 progress_callback((idx + 1) / total_bars)
 
-            # Generate signal from strategy
-            signal = strategy.generate_signal(df, idx)
+            # Generate signal from strategy (returns tuple: signal, reason)
+            signal, reason = strategy.generate_signal(df, idx)
 
             position = portfolio.get_position(symbol)
 
@@ -201,7 +201,7 @@ class SimulationEngine:
                         timestamp=current_time,
                     )
                     if order and portfolio.apply_order(order):
-                        trade = self._build_trade_record(sim_run_id, order)
+                        trade = self._build_trade_record(sim_run_id, order, reason)
                         executed_trades.append(trade)
 
             elif signal == Signal.SELL and position is not None:
@@ -214,7 +214,7 @@ class SimulationEngine:
                     avg_buy_price=position.avg_buy_price,
                 )
                 if order and portfolio.apply_order(order):
-                    trade = self._build_trade_record(sim_run_id, order)
+                    trade = self._build_trade_record(sim_run_id, order, reason)
                     executed_trades.append(trade)
 
         # ── 4. Close any open position at final bar ───────────────────────────
@@ -235,7 +235,9 @@ class SimulationEngine:
                 avg_buy_price=position.avg_buy_price,
             )
             if close_order and portfolio.apply_order(close_order):
-                executed_trades.append(self._build_trade_record(sim_run_id, close_order))
+                executed_trades.append(self._build_trade_record(
+                    sim_run_id, close_order, "Clôture automatique en fin de simulation"
+                ))
 
         # ── 5. Compute final metrics ─────────────────────────────────────────
         final_value = portfolio.cash  # All positions closed
@@ -315,7 +317,7 @@ class SimulationEngine:
         finally:
             session.close()
 
-    def _build_trade_record(self, sim_run_id: int, order) -> Trade:
+    def _build_trade_record(self, sim_run_id: int, order, reason: str = "") -> Trade:
         """Build a Trade ORM object from an ExecutedOrder."""
         return Trade(
             sim_run_id=sim_run_id,
@@ -326,6 +328,7 @@ class SimulationEngine:
             price=order.executed_price,
             fees=order.fees,
             pnl=order.pnl,
+            reason=reason,
         )
 
     def _save_results(

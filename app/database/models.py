@@ -118,6 +118,7 @@ class Trade(Base):
     price: float = Column(Float, nullable=False)
     fees: float = Column(Float, nullable=False, default=0.0)
     pnl: float = Column(Float, nullable=False, default=0.0)
+    reason: str = Column(Text, nullable=True, default="")  # Why the bot made this trade
 
     sim_run: SimRun = relationship("SimRun", back_populates="trades")
 
@@ -133,6 +134,7 @@ class Trade(Base):
             "price": self.price,
             "fees": self.fees,
             "pnl": self.pnl,
+            "reason": self.reason or "",
         }
 
 

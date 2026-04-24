@@ -172,6 +172,27 @@ if "fees" in display_df.columns:
 if "quantity" in display_df.columns:
     display_df["quantity"] = display_df["quantity"].apply(lambda x: f"{x:.4f}")
 
-cols_order = ["id", "timestamp", "symbol", "side", "quantity", "price", "fees", "pnl"]
+cols_order = ["id", "timestamp", "symbol", "side", "quantity", "price", "fees", "pnl", "reason"]
 cols_display = [c for c in cols_order if c in display_df.columns]
-st.dataframe(display_df[cols_display], use_container_width=True, hide_index=True)
+
+col_labels = {
+    "id": "ID", "timestamp": "Date/Heure", "symbol": "Symbole", "side": "Sens",
+    "quantity": "Quantité", "price": "Prix", "fees": "Frais", "pnl": "P&L",
+    "reason": "🤖 Pourquoi le bot a agi",
+}
+display_df = display_df[cols_display].rename(columns=col_labels)
+
+st.dataframe(
+    display_df,
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "🤖 Pourquoi le bot a agi": st.column_config.TextColumn(
+            "🤖 Pourquoi le bot a agi",
+            width="large",
+            help="Explication de la stratégie au moment du signal",
+        ),
+        "Sens": st.column_config.TextColumn("Sens", width="small"),
+        "P&L": st.column_config.TextColumn("P&L", width="small"),
+    },
+)
