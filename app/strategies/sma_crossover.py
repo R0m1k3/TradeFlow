@@ -50,7 +50,7 @@ class SmaCrossoverStrategy(BaseStrategy):
     def name(self) -> str:
         return f"SMA Crossover ({self._fast_period}/{self._slow_period})"
 
-    def generate_signal(self, df: pd.DataFrame, current_idx: int) -> Signal:
+    def generate_signal(self, df: pd.DataFrame, current_idx: int) -> tuple[Signal, str]:
         """
         Evaluate SMA crossover at the given bar index.
 
@@ -59,41 +59,49 @@ class SmaCrossoverStrategy(BaseStrategy):
             current_idx: Current bar index (0-based).
 
         Returns:
-            Signal.BUY, Signal.SELL, or Signal.HOLD.
+            Tuple of (Signal, reason_str).
         """
         fast_col = f"sma_{self._fast_period}"
         slow_col = f"sma_{self._slow_period}"
 
-        # Need at least 2 bars to detect a crossover
         if current_idx < 1:
-            return Signal.HOLD
+            return Signal.HOLD, ""
 
         if fast_col not in df.columns or slow_col not in df.columns:
             logger.warning(
                 "Missing SMA columns '%s' or '%s'. Run add_sma() first.", fast_col, slow_col
             )
-            return Signal.HOLD
+            return Signal.HOLD, f"Colonnes SMA manquantes ({fast_col}, {slow_col})"
 
         fast_now = df[fast_col].iloc[current_idx]
         fast_prev = df[fast_col].iloc[current_idx - 1]
         slow_now = df[slow_col].iloc[current_idx]
         slow_prev = df[slow_col].iloc[current_idx - 1]
 
-        # Skip bars with NaN (insufficient history for SMA calculation)
         if any(pd.isna(v) for v in [fast_now, fast_prev, slow_now, slow_prev]):
-            return Signal.HOLD
+            return Signal.HOLD, ""
 
         # Golden cross: fast crosses above slow
         if fast_prev <= slow_prev and fast_now > slow_now:
+            reason = (
+                f"Croisement haussier (Golden Cross) : "
+                f"SMA{self._fast_period} ({fast_now:.2f}) a croisé au-dessus de "
+                f"SMA{self._slow_period} ({slow_now:.2f})"
+            )
             logger.debug("BUY signal at idx=%d (golden cross)", current_idx)
-            return Signal.BUY
+            return Signal.BUY, reason
 
         # Death cross: fast crosses below slow
         if fast_prev >= slow_prev and fast_now < slow_now:
+            reason = (
+                f"Croisement baissier (Death Cross) : "
+                f"SMA{self._fast_period} ({fast_now:.2f}) a croisé en-dessous de "
+                f"SMA{self._slow_period} ({slow_now:.2f})"
+            )
             logger.debug("SELL signal at idx=%d (death cross)", current_idx)
-            return Signal.SELL
+            return Signal.SELL, reason
 
-        return Signal.HOLD
+        return Signal.HOLD, ""
 
     def get_params(self) -> dict[str, Any]:
         return {

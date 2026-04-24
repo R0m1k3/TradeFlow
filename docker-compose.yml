@@ -1,4 +1,6 @@
 services:
+
+  # ── WebUI — Streamlit dashboard ─────────────────────────────────────────────
   tradeflow:
     build:
       context: .
@@ -7,12 +9,9 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # Use a named volume instead of bind mount to preserve non-root permissions
       - tradeflow_data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
-      # Override DB path if needed via env
-      # - DATABASE_PATH=/app/data/tradeflow.db
     restart: unless-stopped
     networks:
       - nginx_default
@@ -23,6 +22,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # ── Bot — Live trading loop ──────────────────────────────────────────────────
+  # Runs independently, shares the same SQLite DB via the named volume.
+  # Start a live session from the WebUI → this service picks it up immediately.
+  #
+  # BOT_TICK_SECONDS controls how often the bot checks for new signals:
+  #   3600  = every hour  (good for 1h bars)
+  #   900   = every 15min (good for 15m bars)
+  #   60    = every minute (good for testing / 1d bars with fast feedback)
+  tradeflow_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradeflow_bot
+    command: python app/bot/run_bot.py
+    volumes:
+      - tradeflow_data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BOT_TICK_SECONDS=3600     # Change to 60 for testing
+      - BOT_COMMISSION=0.001
+      - BOT_SLIPPAGE=0.0005
+      - BOT_POSITION_SIZE=0.95
+      - BOT_DATA_PERIOD=3mo
+    restart: unless-stopped
+    depends_on:
+      - tradeflow
 
 networks:
   nginx_default:

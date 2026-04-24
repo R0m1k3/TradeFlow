@@ -51,7 +51,7 @@ class MacdStrategy(BaseStrategy):
     def name(self) -> str:
         return f"MACD ({self._fast}/{self._slow}/{self._signal})"
 
-    def generate_signal(self, df: pd.DataFrame, current_idx: int) -> Signal:
+    def generate_signal(self, df: pd.DataFrame, current_idx: int) -> tuple[Signal, str]:
         """
         Evaluate MACD crossover at the given bar index.
 
@@ -60,10 +60,10 @@ class MacdStrategy(BaseStrategy):
             current_idx: Current bar index (0-based).
 
         Returns:
-            Signal.BUY, Signal.SELL, or Signal.HOLD.
+            Tuple of (Signal, reason_str).
         """
         if current_idx < 1:
-            return Signal.HOLD
+            return Signal.HOLD, ""
 
         if self._macd_col not in df.columns or self._signal_col not in df.columns:
             logger.warning(
@@ -71,7 +71,7 @@ class MacdStrategy(BaseStrategy):
                 self._macd_col,
                 self._signal_col,
             )
-            return Signal.HOLD
+            return Signal.HOLD, f"Colonnes MACD manquantes"
 
         macd_now = df[self._macd_col].iloc[current_idx]
         macd_prev = df[self._macd_col].iloc[current_idx - 1]
@@ -79,23 +79,27 @@ class MacdStrategy(BaseStrategy):
         signal_prev = df[self._signal_col].iloc[current_idx - 1]
 
         if any(pd.isna(v) for v in [macd_now, macd_prev, signal_now, signal_prev]):
-            return Signal.HOLD
+            return Signal.HOLD, ""
 
         # MACD crosses above signal line → BUY
         if macd_prev <= signal_prev and macd_now > signal_now:
-            logger.debug(
-                "BUY signal at idx=%d (MACD crossover up, MACD=%.4f)", current_idx, macd_now
+            reason = (
+                f"MACD haussier : ligne MACD ({macd_now:.4f}) a croisé au-dessus de "
+                f"la ligne signal ({signal_now:.4f}) — élan acheteur"
             )
-            return Signal.BUY
+            logger.debug("BUY signal at idx=%d (MACD crossover up, MACD=%.4f)", current_idx, macd_now)
+            return Signal.BUY, reason
 
         # MACD crosses below signal line → SELL
         if macd_prev >= signal_prev and macd_now < signal_now:
-            logger.debug(
-                "SELL signal at idx=%d (MACD crossover down, MACD=%.4f)", current_idx, macd_now
+            reason = (
+                f"MACD baissier : ligne MACD ({macd_now:.4f}) a croisé en-dessous de "
+                f"la ligne signal ({signal_now:.4f}) — élan vendeur"
             )
-            return Signal.SELL
+            logger.debug("SELL signal at idx=%d (MACD crossover down, MACD=%.4f)", current_idx, macd_now)
+            return Signal.SELL, reason
 
-        return Signal.HOLD
+        return Signal.HOLD, ""
 
     def get_params(self) -> dict[str, Any]:
         return {

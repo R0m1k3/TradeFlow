@@ -38,3 +38,16 @@ indicators:
   sma_windows: [20, 50, 200]
   bollinger_window: 20
   bollinger_std: 2
+
+# ── Live Trading Bot ───────────────────────────────────────────────────────────
+# Configure the continuous bot here. Start/stop from the WebUI (Analyse en Direct).
+live_trading:
+  strategy: "sma_crossover"         # sma_crossover | rsi | macd
+  symbols:
+    - AAPL
+    - TSLA
+    - MC.PA
+  interval: "1h"
+  initial_capital: 10000
+  position_size: 0.95
+  # Tick interval is set via BOT_TICK_SECONDS env var in docker-compose.yml

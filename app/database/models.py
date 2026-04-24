@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -64,6 +65,11 @@ class SimRun(Base):
     win_rate: float = Column(Float, nullable=True)
     total_trades: int = Column(Integer, nullable=True)
 
+    # Live trading fields
+    is_live: bool = Column(Boolean, default=False, nullable=False)
+    status: str = Column(String(16), default="completed", nullable=False)  # running|completed|stopped
+    last_tick_at: datetime = Column(DateTime, nullable=True)
+
     created_at: datetime = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -88,6 +94,9 @@ class SimRun(Base):
             "max_drawdown_pct": self.max_drawdown_pct,
             "win_rate": self.win_rate,
             "total_trades": self.total_trades,
+            "is_live": self.is_live,
+            "status": self.status,
+            "last_tick_at": self.last_tick_at.isoformat() if self.last_tick_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -118,6 +127,7 @@ class Trade(Base):
     price: float = Column(Float, nullable=False)
     fees: float = Column(Float, nullable=False, default=0.0)
     pnl: float = Column(Float, nullable=False, default=0.0)
+    reason: str = Column(Text, nullable=True, default="")  # Why the bot made this trade
 
     sim_run: SimRun = relationship("SimRun", back_populates="trades")
 
@@ -133,6 +143,7 @@ class Trade(Base):
             "price": self.price,
             "fees": self.fees,
             "pnl": self.pnl,
+            "reason": self.reason or "",
         }
 
 
