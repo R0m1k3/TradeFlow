@@ -92,6 +92,7 @@ class SimulationEngine:
         period: str = "3mo",
         initial_capital: float = 10_000.0,
         progress_callback: Optional[Callable[[float], None]] = None,
+        save_to_db: bool = True,
     ) -> Optional[SimResult]:
         """
         Execute a full backtest simulation.
@@ -103,6 +104,7 @@ class SimulationEngine:
             period: Historical data lookback period.
             initial_capital: Starting portfolio cash.
             progress_callback: Optional callable(pct: float) called each bar for UI updates.
+            save_to_db: If True, persists trades and portfolio snapshots to SQLite.
 
         Returns:
             SimResult with all metrics and trade history, or None on failure.
@@ -146,16 +148,20 @@ class SimulationEngine:
         )
         portfolio = Portfolio(initial_capital=initial_capital)
 
-        sim_run = self._create_sim_run(
-            strategy=strategy,
-            symbol=symbol,
-            interval=interval,
-            initial_capital=initial_capital,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        if sim_run is None:
-            return None
+        if save_to_db:
+            sim_run = self._create_sim_run(
+                strategy=strategy,
+                symbol=symbol,
+                interval=interval,
+                initial_capital=initial_capital,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if sim_run is None:
+                return None
+            sim_run_id = sim_run.id
+        else:
+            sim_run_id = -1
 
         executed_trades: list[Trade] = []
         equity_curve: list[tuple[datetime, float]] = []
@@ -195,7 +201,7 @@ class SimulationEngine:
                         timestamp=current_time,
                     )
                     if order and portfolio.apply_order(order):
-                        trade = self._build_trade_record(sim_run.id, order)
+                        trade = self._build_trade_record(sim_run_id, order)
                         executed_trades.append(trade)
 
             elif signal == Signal.SELL and position is not None:
@@ -208,7 +214,7 @@ class SimulationEngine:
                     avg_buy_price=position.avg_buy_price,
                 )
                 if order and portfolio.apply_order(order):
-                    trade = self._build_trade_record(sim_run.id, order)
+                    trade = self._build_trade_record(sim_run_id, order)
                     executed_trades.append(trade)
 
         # ── 4. Close any open position at final bar ───────────────────────────
@@ -229,7 +235,7 @@ class SimulationEngine:
                 avg_buy_price=position.avg_buy_price,
             )
             if close_order and portfolio.apply_order(close_order):
-                executed_trades.append(self._build_trade_record(sim_run.id, close_order))
+                executed_trades.append(self._build_trade_record(sim_run_id, close_order))
 
         # ── 5. Compute final metrics ─────────────────────────────────────────
         final_value = portfolio.cash  # All positions closed
@@ -239,16 +245,17 @@ class SimulationEngine:
         win_rate, total_trades = self._compute_win_rate(executed_trades)
 
         # ── 6. Persist results to DB ─────────────────────────────────────────
-        self._save_results(
-            sim_run=sim_run,
-            trades=executed_trades,
-            portfolio_snapshots=portfolio.snapshots,
-            final_value=final_value,
-            total_return_pct=total_return_pct,
-            sharpe=sharpe,
-            max_drawdown=max_drawdown,
-            win_rate=win_rate,
-        )
+        if save_to_db and sim_run_id != -1:
+            self._save_results(
+                sim_run_id=sim_run_id,
+                trades=executed_trades,
+                portfolio_snapshots=portfolio.snapshots,
+                final_value=final_value,
+                total_return_pct=total_return_pct,
+                sharpe=sharpe,
+                max_drawdown=max_drawdown,
+                win_rate=win_rate,
+            )
 
         logger.info(
             "Simulation complete: return=%.2f%%, Sharpe=%.2f, drawdown=%.2f%%, trades=%d",
@@ -259,7 +266,7 @@ class SimulationEngine:
         )
 
         return SimResult(
-            sim_run_id=sim_run.id,
+            sim_run_id=sim_run_id,
             strategy_name=strategy.name,
             symbol=symbol,
             interval=interval,
@@ -323,7 +330,7 @@ class SimulationEngine:
 
     def _save_results(
         self,
-        sim_run: SimRun,
+        sim_run_id: int,
         trades: list[Trade],
         portfolio_snapshots: list,
         final_value: float,
@@ -336,7 +343,7 @@ class SimulationEngine:
         session = get_session()
         try:
             # Update SimRun with final metrics
-            db_run = session.get(SimRun, sim_run.id)
+            db_run = session.get(SimRun, sim_run_id)
             if db_run:
                 db_run.final_value = final_value
                 db_run.total_return_pct = total_return_pct
@@ -352,7 +359,7 @@ class SimulationEngine:
             sampled = portfolio_snapshots[::10] if len(portfolio_snapshots) > 100 else portfolio_snapshots
             snapshot_rows = [
                 PortfolioModel(
-                    sim_run_id=sim_run.id,
+                    sim_run_id=sim_run_id,
                     timestamp=snap.timestamp,
                     cash=snap.cash,
                     total_value=snap.total_value,

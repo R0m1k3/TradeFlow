@@ -19,7 +19,7 @@ from app.webui.components.metrics import (
     compute_win_rate,
 )
 
-st.set_page_config(page_title="Trades — TradeFlow", layout="wide", page_icon="📋")
+st.set_page_config(page_title="Transactions — TradeFlow", layout="wide", page_icon="📋")
 st.markdown(
     "<style>html,body,[class*='css']{font-family:'Inter',sans-serif!important;}"
     ".main .block-container{padding:1.5rem 2rem;max-width:1600px;}"
@@ -30,7 +30,7 @@ st.markdown(
 
 init_database()
 
-st.markdown("## 📋 Trade History")
+st.markdown("## 📋 Historique des Transactions")
 st.markdown("---")
 
 # ── Load simulation runs ───────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ def load_trades_for_run(run_id: int) -> pd.DataFrame:
 runs_df = load_runs()
 
 if runs_df.empty:
-    st.info("No simulations found. Go to **Simulation** to run your first backtest.")
+    st.info("Aucune simulation trouvée. Allez dans **Simulation** pour lancer votre premier backtest.")
     st.stop()
 
 # ── Selectors ─────────────────────────────────────────────────────────────────
@@ -72,16 +72,16 @@ with col_sel:
         f"#{r['id']} — {r['strategy']} on {r['symbol']} [{r['interval']}] ({r['created_at'][:10]})": r["id"]
         for _, r in runs_df.iterrows()
     }
-    selected_label = st.selectbox("Select Simulation Run", list(run_options.keys()), key="trades_run_sel")
+    selected_label = st.selectbox("Sélectionner une simulation", list(run_options.keys()), key="trades_run_sel")
     run_id = run_options[selected_label]
 
 with col_side:
-    side_filter = st.selectbox("Filter by Side", ["ALL", "BUY", "SELL"], key="trades_side_filter")
+    side_filter = st.selectbox("Filtrer par sens (Side)", ["ALL", "BUY", "SELL"], key="trades_side_filter")
 
 trades_df = load_trades_for_run(run_id)
 
 if trades_df.empty:
-    st.warning("No trades recorded for this simulation.")
+    st.warning("Aucune transaction enregistrée pour cette simulation.")
     st.stop()
 
 # Apply side filter
@@ -98,15 +98,15 @@ total_pnl = trades_df[trades_df["side"] == "SELL"]["pnl"].sum() if not trades_df
 
 m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
-    st.metric("Total Trades", len(trades_df))
+    st.metric("Total des Trades", len(trades_df))
 with m2:
-    st.metric("Win Rate", f"{win_rate * 100:.1f}%")
+    st.metric("Taux de Réussite", f"{win_rate * 100:.1f}%")
 with m3:
-    st.metric("Profit Factor", f"{profit_factor:.2f}" if profit_factor != float("inf") else "∞")
+    st.metric("Facteur de Profit", f"{profit_factor:.2f}" if profit_factor != float("inf") else "∞")
 with m4:
-    st.metric("Avg Trade P&L", f"${avg_pnl:+.2f}")
+    st.metric("P&L Moyen par Trade", f"${avg_pnl:+.2f}")
 with m5:
-    st.metric("Total Realized P&L", f"${total_pnl:+.2f}")
+    st.metric("P&L Réalisé Total", f"${total_pnl:+.2f}")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -133,7 +133,7 @@ with col_cumulative:
                 x=sell_trades["timestamp"],
                 y=sell_trades["cum_pnl"],
                 mode="lines+markers",
-                name="Cumulative P&L",
+                name="P&L Cumulé",
                 line=dict(color="#00C896", width=2),
                 marker=dict(
                     color=["#00C896" if p >= 0 else "#FF4B6E" for p in sell_trades["pnl"]],
@@ -145,7 +145,7 @@ with col_cumulative:
         )
         fig_cum.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)")
         fig_cum.update_layout(
-            title="Cumulative P&L",
+            title="P&L Cumulé",
             template="plotly_dark",
             paper_bgcolor="#0D1117",
             plot_bgcolor="#0D1117",
@@ -160,7 +160,7 @@ with col_cumulative:
 st.markdown("---")
 
 # ── Trades table ──────────────────────────────────────────────────────────────
-st.markdown(f"### Trades ({len(filtered_df)} records)")
+st.markdown(f"### Transactions ({len(filtered_df)} résultats)")
 
 # Color-code P&L in display
 display_df = filtered_df.copy()

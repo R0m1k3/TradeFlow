@@ -20,7 +20,7 @@ st.set_page_config(
     menu_items={
         "Get help": None,
         "Report a bug": None,
-        "About": "TradeFlow — Algorithmic Trading Simulator",
+        "About": "TradeFlow — Simulateur de Trading Algorithmique",
     },
 )
 
@@ -194,7 +194,7 @@ with st.sidebar:
                 TradeFlow
             </div>
             <div style="font-size: 0.72rem; color: #8B949E; margin-top: 2px;">
-                Algorithmic Trading Simulator
+                Simulateur de Trading Algorithmique
             </div>
         </div>
         <hr style="border-color: #30363D; margin: 0 0 1rem;">
@@ -213,22 +213,23 @@ st.markdown(
             TradeFlow
         </h1>
         <p style="color: #8B949E; font-size: 1.1rem; margin-top: 0.5rem;">
-            Algorithmic Trading Simulator — US &amp; European Markets
+            Simulateur de Trading Algorithmique — Marchés US &amp; Européens
         </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 cards = [
-    ("📊", "Dashboard", "Portfolio overview, equity curve, and simulation history."),
-    ("🕯️", "Charts", "Interactive candlestick charts with indicators and trade markers."),
-    ("📋", "Trades", "Full trade history with statistics and P&L analysis."),
-    ("🚀", "Simulation", "Configure and run backtests on US & European assets."),
+    ("📊", "Tableau de Bord", "Aperçu du portefeuille, courbe de capital et historique des simulations."),
+    ("🕯️", "Graphiques", "Graphiques en chandeliers interactifs avec indicateurs et marqueurs de trades."),
+    ("📋", "Transactions", "Historique complet des transactions avec statistiques et analyse P&L."),
+    ("🚀", "Simulation", "Configurez et lancez des backtests sur des actifs US et Européens."),
+    ("⚙️", "Optimisation", "Trouvez automatiquement les meilleurs paramètres (Grid Search) pour une stratégie."),
 ]
 
-for col, (icon, title, desc) in zip([col1, col2, col3, col4], cards):
+for col, (icon, title, desc) in zip([col1, col2, col3, col4, col5], cards):
     with col:
         st.markdown(
             f"""
@@ -242,4 +243,4 @@ for col, (icon, title, desc) in zip([col1, col2, col3, col4], cards):
         )
 
 st.markdown("<br>", unsafe_allow_html=True)
-st.info("👈 **Use the sidebar to navigate between pages.** Start with **Simulation** to run your first backtest.")
+st.info("👈 **Utilisez le menu latéral pour naviguer entre les pages.** Commencez par **Simulation** pour lancer votre premier backtest.")

@@ -21,7 +21,7 @@ from app.webui.components.metrics import (
     compute_win_rate,
 )
 
-st.set_page_config(page_title="Dashboard — TradeFlow", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Tableau de Bord — TradeFlow", layout="wide", page_icon="📊")
 
 # ── Inject shared CSS ─────────────────────────────────────────────────────────
 st.markdown(
@@ -81,13 +81,13 @@ def load_trades(sim_run_id: int) -> pd.DataFrame:
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("## 📊 Dashboard")
+st.markdown("## 📊 Tableau de Bord")
 st.markdown("---")
 
 runs_df = load_all_sim_runs()
 
 if runs_df.empty:
-    st.info("No simulations found. Go to **Simulation** to run your first backtest.")
+    st.info("Aucune simulation trouvée. Allez dans **Simulation** pour lancer votre premier backtest.")
     st.stop()
 
 # ── Simulation selector ───────────────────────────────────────────────────────
@@ -97,11 +97,11 @@ with col_select:
         f"#{row['id']} — {row['strategy']} on {row['symbol']} [{row['interval']}] ({row['created_at'][:10]})": row["id"]
         for _, row in runs_df.iterrows()
     }
-    selected_label = st.selectbox("Select Simulation Run", options=list(run_options.keys()), key="dash_run_select")
+    selected_label = st.selectbox("Sélectionner une simulation", options=list(run_options.keys()), key="dash_run_select")
     selected_run_id = run_options[selected_label]
 
 with col_refresh:
-    if st.button("🔄 Refresh", key="dash_refresh"):
+    if st.button("🔄 Rafraîchir", key="dash_refresh"):
         st.cache_data.clear()
         st.rerun()
 
@@ -118,17 +118,17 @@ drawdown = selected_run.get("max_drawdown_pct") or 0
 win_rate = selected_run.get("win_rate") or 0
 
 with m1:
-    st.metric("Portfolio Value", f"${final_val:,.2f}", delta=f"{ret_pct:+.2f}%")
+    st.metric("Valeur du Portefeuille", f"${final_val:,.2f}", delta=f"{ret_pct:+.2f}%")
 with m2:
-    st.metric("Total Return", f"{ret_pct:+.2f}%")
+    st.metric("Rendement Total", f"{ret_pct:+.2f}%")
 with m3:
-    st.metric("Sharpe Ratio", f"{sharpe:.2f}")
+    st.metric("Ratio de Sharpe", f"{sharpe:.2f}")
 with m4:
-    st.metric("Max Drawdown", f"-{drawdown:.2f}%")
+    st.metric("Drawdown Max", f"-{drawdown:.2f}%")
 with m5:
-    st.metric("Win Rate", f"{win_rate * 100:.1f}%")
+    st.metric("Taux de Réussite", f"{win_rate * 100:.1f}%")
 with m6:
-    st.metric("Total Trades", str(selected_run.get("total_trades") or 0))
+    st.metric("Total des Trades", str(selected_run.get("total_trades") or 0))
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -141,20 +141,20 @@ with col_chart:
         fig = build_equity_curve_chart(equity_df, initial_capital=initial_cap)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("No equity curve data for this simulation.")
+        st.warning("Aucune donnée de courbe de capital pour cette simulation.")
 
 with col_info:
     st.markdown(
         f"""
         <div style="background:#1C2333;border:1px solid #30363D;border-radius:12px;padding:1.25rem;">
-            <div style="font-weight:600;margin-bottom:1rem;color:#E6EDF3;">Run Details</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Strategy</div>
+            <div style="font-weight:600;margin-bottom:1rem;color:#E6EDF3;">Détails de la simulation</div>
+            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Stratégie</div>
             <div style="color:#00C896;font-weight:500;margin-bottom:0.8rem;">{selected_run.get('strategy','—')}</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Symbol</div>
+            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Symbole</div>
             <div style="color:#E6EDF3;font-weight:500;margin-bottom:0.8rem;">{selected_run.get('symbol','—')}</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Interval</div>
+            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Intervalle</div>
             <div style="color:#E6EDF3;font-weight:500;margin-bottom:0.8rem;">{selected_run.get('interval','—')}</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Period</div>
+            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Période</div>
             <div style="color:#E6EDF3;font-weight:500;">{selected_run.get('start_date','—')} → {selected_run.get('end_date','—')}</div>
         </div>
         """,
@@ -170,7 +170,7 @@ with col_info:
 
 # ── All simulations table ─────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("### 📋 All Simulation Runs")
+st.markdown("### 📋 Toutes les Simulations")
 
 display_cols = ["id", "strategy", "symbol", "interval", "initial_capital",
                 "final_value", "total_return_pct", "sharpe_ratio",
