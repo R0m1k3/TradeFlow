@@ -1,297 +1,376 @@
 """
-TradeFlow — Analyse en Direct
-Montre l'état actuel du bot pour chaque symbole :
-indicateurs en temps réel + signal que le bot émettrait MAINTENANT.
+TradeFlow — Live Trading Dashboard
+Control the real-time bot and monitor its activity:
+  • Start / Stop the live session
+  • Current positions and portfolio value
+  • Recent trades with reasons
+  • Signal the bot would fire RIGHT NOW per symbol
+  • Auto-refresh every 30s
 """
+
+from __future__ import annotations
 
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-import pandas as pd
-import streamlit as st
-import plotly.graph_objects as go
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+from app.bot.live_trader import (
+    STRATEGY_MAP,
+    create_live_session,
+    get_active_live_session,
+    stop_live_session,
+)
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
-from app.strategies.sma_crossover import SmaCrossoverStrategy
-from app.strategies.rsi_strategy import RsiStrategy
-from app.strategies.macd_strategy import MacdStrategy
+from app.database.models import Portfolio as PortfolioModel, SimRun, Trade
+from app.database.session import get_session, init_database
 from app.strategies.base import Signal
 
-st.set_page_config(page_title="Analyse en Direct — TradeFlow", layout="wide", page_icon="🔴")
+st.set_page_config(
+    page_title="Live — TradeFlow",
+    layout="wide",
+    page_icon="🔴",
+)
 st.markdown("<style>#MainMenu,footer,header{visibility:hidden;}</style>", unsafe_allow_html=True)
 
-SYMBOLS = {
-    "Apple (AAPL)": "AAPL",
-    "Tesla (TSLA)": "TSLA",
-    "Nvidia (NVDA)": "NVDA",
-    "Microsoft (MSFT)": "MSFT",
-    "Amazon (AMZN)": "AMZN",
-    "LVMH (MC.PA)": "MC.PA",
-    "TotalEnergies (TTE.PA)": "TTE.PA",
-    "Airbus (AIR.PA)": "AIR.PA",
+# Auto-refresh every 30 seconds
+st.markdown('<meta http-equiv="refresh" content="30">', unsafe_allow_html=True)
+
+init_database()
+
+STRATEGY_LABELS = {
+    "sma_crossover": "SMA Crossover (20/50)",
+    "rsi": "RSI (14) [30/70]",
+    "macd": "MACD (12/26/9)",
+}
+SIGNAL_STYLE = {
+    Signal.BUY:  {"icon": "🟢", "label": "ACHETER", "color": "#00C896"},
+    Signal.SELL: {"icon": "🔴", "label": "VENDRE",  "color": "#FF4B6E"},
+    Signal.HOLD: {"icon": "⏸️", "label": "ATTENDRE", "color": "#8B949E"},
 }
 
-STRATEGIES = {
-    "SMA Crossover (20/50)": SmaCrossoverStrategy,
-    "RSI (14) [30/70]": RsiStrategy,
-    "MACD (12/26/9)": MacdStrategy,
-}
+DEFAULT_SYMBOLS = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "MC.PA", "TTE.PA", "AIR.PA"]
 
-SIGNAL_COLORS = {
-    Signal.BUY:  {"bg": "#0d2b1e", "border": "#00C896", "text": "#00C896", "icon": "🟢", "label": "ACHETER"},
-    Signal.SELL: {"bg": "#2b0d12", "border": "#FF4B6E", "text": "#FF4B6E", "icon": "🔴", "label": "VENDRE"},
-    Signal.HOLD: {"bg": "#1a1a2e", "border": "#58A6FF", "text": "#8B949E", "icon": "⏸️", "label": "ATTENDRE"},
-}
+# ── Header ─────────────────────────────────────────────────────────────────────
+st.markdown("## 🔴 Trading en Temps Réel")
+st.caption("Le bot surveille les marchés et exécute des trades simulés automatiquement.")
 
-# ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("## 🔴 Analyse en Direct")
-st.markdown("Signaux que le bot émettrait **maintenant** sur les dernières données disponibles.")
+# ── Load active session ────────────────────────────────────────────────────────
+active = get_active_live_session()
+
+# ── START / STOP panel ─────────────────────────────────────────────────────────
+with st.expander("⚙️ Configurer et démarrer le bot", expanded=(active is None)):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        strategy_key = st.selectbox(
+            "Stratégie",
+            list(STRATEGY_LABELS.keys()),
+            format_func=lambda k: STRATEGY_LABELS[k],
+            key="live_cfg_strategy",
+        )
+    with col2:
+        symbols = st.multiselect(
+            "Symboles à trader",
+            DEFAULT_SYMBOLS,
+            default=["AAPL", "TSLA", "MC.PA"],
+            key="live_cfg_symbols",
+        )
+        custom = st.text_input("Ajouter un ticker personnalisé", placeholder="ex: NVDA", key="live_cfg_custom")
+        if custom:
+            for t in [x.strip().upper() for x in custom.split(",") if x.strip()]:
+                if t not in symbols:
+                    symbols.append(t)
+    with col3:
+        interval = st.selectbox("Intervalle", ["1h", "15m", "1d"], key="live_cfg_interval")
+        capital = st.number_input("Capital initial ($)", min_value=1000, max_value=10_000_000,
+                                   value=10_000, step=1000, key="live_cfg_capital")
+
+    c_start, c_stop = st.columns(2)
+    with c_start:
+        if st.button("🚀 Démarrer le bot", use_container_width=True, type="primary",
+                     disabled=(active is not None)):
+            if not symbols:
+                st.error("Choisissez au moins un symbole.")
+            else:
+                run_id = create_live_session(strategy_key, symbols, interval, capital)
+                st.success(f"✅ Session live #{run_id} démarrée ! Le bot commence à la prochaine tick.")
+                st.rerun()
+    with c_stop:
+        if st.button("🛑 Arrêter le bot", use_container_width=True,
+                     disabled=(active is None)):
+            stop_live_session()
+            st.warning("⏹️ Bot arrêté.")
+            st.rerun()
+
 st.markdown("---")
 
-# ── Controls ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### Paramètres")
-    interval = st.selectbox("Intervalle", ["1h", "15m", "1d"], key="live_interval")
-    period = st.selectbox("Fenêtre d'analyse", ["1mo", "3mo", "6mo"], index=1, key="live_period",
-                          format_func=lambda x: {"1mo": "1 mois", "3mo": "3 mois", "6mo": "6 mois"}[x])
-    selected_symbols = st.multiselect(
-        "Symboles à analyser",
-        list(SYMBOLS.keys()),
-        default=["Apple (AAPL)", "Tesla (TSLA)", "LVMH (MC.PA)"],
-        key="live_symbols",
-    )
-    selected_strats = st.multiselect(
-        "Stratégies",
-        list(STRATEGIES.keys()),
-        default=list(STRATEGIES.keys()),
-        key="live_strats",
-    )
-    refresh = st.button("🔄 Actualiser les données", use_container_width=True)
+# ── No active session ──────────────────────────────────────────────────────────
+if active is None:
+    st.info("Aucune session active. Configurez et démarrez le bot ci-dessus.")
 
-if not selected_symbols:
-    st.warning("Sélectionnez au moins un symbole dans le menu latéral.")
+    # Show past live sessions
+    session = get_session()
+    try:
+        past = session.query(SimRun).filter_by(is_live=True).order_by(SimRun.created_at.desc()).limit(5).all()
+    finally:
+        session.close()
+
+    if past:
+        st.markdown("### Sessions passées")
+        past_df = pd.DataFrame([r.to_dict() for r in past])
+        cols = ["id", "strategy", "symbol", "interval", "initial_capital",
+                "final_value", "total_return_pct", "status", "created_at"]
+        st.dataframe(past_df[[c for c in cols if c in past_df.columns]],
+                     use_container_width=True, hide_index=True)
     st.stop()
 
-if not selected_strats:
-    st.warning("Sélectionnez au moins une stratégie.")
-    st.stop()
+# ── Active session header ──────────────────────────────────────────────────────
+run_id = active["id"]
+symbols_live = [s.strip() for s in active["symbol"].split(",")]
+strategy_live = active["strategy"]
+initial_cap = active["initial_capital"]
+last_tick = active.get("last_tick_at")
+
+st.markdown(
+    f"""
+    <div style="background:#0d2b1e;border:1px solid #00C896;border-radius:8px;padding:1rem 1.5rem;margin-bottom:1rem;">
+        <span style="font-size:1.1rem;font-weight:700;color:#00C896;">🤖 Bot ACTIF</span>
+        &nbsp;·&nbsp;
+        <span style="color:#E6EDF3;">Session #{run_id}</span>
+        &nbsp;·&nbsp;
+        <span style="color:#8B949E;">{STRATEGY_LABELS.get(strategy_live, strategy_live)}</span>
+        &nbsp;·&nbsp;
+        <span style="color:#8B949E;">{', '.join(symbols_live)}</span>
+        &nbsp;·&nbsp;
+        <span style="color:#8B949E;">Interval : {active['interval']}</span>
+        {"&nbsp;·&nbsp;<span style='color:#8B949E;'>Dernier tick : " + last_tick[:19].replace("T"," ") + "</span>" if last_tick else ""}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_live_data(symbol: str, interval: str, period: str) -> pd.DataFrame:
-    df = fetch_ohlcv(symbol, interval=interval, period=period, use_cache=False)
-    if df is not None and not df.empty:
-        return add_all_indicators(df)
-    return pd.DataFrame()
+# ── Load live data ─────────────────────────────────────────────────────────────
+@st.cache_data(ttl=60)
+def load_recent_trades(run_id: int) -> pd.DataFrame:
+    session = get_session()
+    try:
+        trades = (
+            session.query(Trade)
+            .filter_by(sim_run_id=run_id)
+            .order_by(Trade.timestamp.desc())
+            .limit(50)
+            .all()
+        )
+        return pd.DataFrame([t.to_dict() for t in trades]) if trades else pd.DataFrame()
+    finally:
+        session.close()
 
 
-def get_current_indicators(df: pd.DataFrame) -> dict:
-    """Extract the most recent indicator values."""
-    if df.empty:
+@st.cache_data(ttl=60)
+def load_equity_snapshots(run_id: int) -> pd.DataFrame:
+    session = get_session()
+    try:
+        snaps = (
+            session.query(PortfolioModel)
+            .filter_by(sim_run_id=run_id)
+            .order_by(PortfolioModel.timestamp.asc())
+            .all()
+        )
+        if not snaps:
+            return pd.DataFrame()
+        return pd.DataFrame([{"timestamp": s.timestamp, "total_value": s.total_value, "cash": s.cash} for s in snaps])
+    finally:
+        session.close()
+
+
+@st.cache_data(ttl=60)
+def load_latest_positions(run_id: int) -> dict:
+    session = get_session()
+    try:
+        snap = (
+            session.query(PortfolioModel)
+            .filter_by(sim_run_id=run_id)
+            .order_by(PortfolioModel.timestamp.desc())
+            .first()
+        )
+        if snap:
+            return {"cash": snap.cash, "total_value": snap.total_value,
+                    "positions": json.loads(snap.positions_json)}
         return {}
-    last = df.iloc[-1]
-    result = {"close": float(last["close"])}
-
-    rsi_cols = [c for c in df.columns if c.startswith("rsi_")]
-    if rsi_cols:
-        result["rsi"] = float(last[rsi_cols[0]]) if not pd.isna(last[rsi_cols[0]]) else None
-
-    sma_20 = "sma_20"
-    sma_50 = "sma_50"
-    if sma_20 in df.columns and not pd.isna(last[sma_20]):
-        result["sma_20"] = float(last[sma_20])
-    if sma_50 in df.columns and not pd.isna(last[sma_50]):
-        result["sma_50"] = float(last[sma_50])
-
-    macd_cols = [c for c in df.columns if c.startswith("MACD_") and "MACDs" not in c and "MACDh" not in c]
-    signal_cols = [c for c in df.columns if c.startswith("MACDs_")]
-    if macd_cols and not pd.isna(last[macd_cols[0]]):
-        result["macd"] = float(last[macd_cols[0]])
-    if signal_cols and not pd.isna(last[signal_cols[0]]):
-        result["macd_signal"] = float(last[signal_cols[0]])
-
-    return result
+    finally:
+        session.close()
 
 
-def render_signal_card(symbol: str, strategy_name: str, signal: Signal, reason: str, indicators: dict):
-    """Render a signal card with color coding and indicator values."""
-    style = SIGNAL_COLORS[signal]
-    price = indicators.get("close", 0)
+trades_df = load_recent_trades(run_id)
+equity_df = load_equity_snapshots(run_id)
+latest = load_latest_positions(run_id)
 
-    # Build indicator badges
-    badges = []
-    if "rsi" in indicators and indicators["rsi"] is not None:
-        rsi = indicators["rsi"]
-        rsi_color = "#FF4B6E" if rsi > 70 else ("#00C896" if rsi < 30 else "#8B949E")
-        badges.append(f'<span style="background:{rsi_color}22;color:{rsi_color};padding:2px 8px;border-radius:4px;font-size:0.75rem;">RSI {rsi:.1f}</span>')
-    if "sma_20" in indicators and "sma_50" in indicators:
-        diff = indicators["sma_20"] - indicators["sma_50"]
-        sma_color = "#00C896" if diff > 0 else "#FF4B6E"
-        badges.append(f'<span style="background:{sma_color}22;color:{sma_color};padding:2px 8px;border-radius:4px;font-size:0.75rem;">SMA20{"↑" if diff > 0 else "↓"}SMA50</span>')
-    if "macd" in indicators and "macd_signal" in indicators:
-        diff = indicators["macd"] - indicators["macd_signal"]
-        macd_color = "#00C896" if diff > 0 else "#FF4B6E"
-        badges.append(f'<span style="background:{macd_color}22;color:{macd_color};padding:2px 8px;border-radius:4px;font-size:0.75rem;">MACD{"↑" if diff > 0 else "↓"}</span>')
+# ── Portfolio metrics ──────────────────────────────────────────────────────────
+cash = latest.get("cash", initial_cap)
+total_value = latest.get("total_value", initial_cap)
+positions = latest.get("positions", {})
+pnl = total_value - initial_cap
+pnl_pct = pnl / initial_cap * 100
+n_trades = len(trades_df) if not trades_df.empty else 0
 
-    badges_html = " ".join(badges)
-    reason_html = f'<div style="margin-top:0.5rem;font-size:0.82rem;color:#8B949E;font-style:italic;">{reason if reason else "Pas de signal actif — en attente"}</div>' if signal == Signal.HOLD else f'<div style="margin-top:0.5rem;font-size:0.85rem;color:{style["text"]};">{reason}</div>'
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("💼 Valeur totale", f"${total_value:,.2f}", delta=f"{pnl_pct:+.2f}%")
+m2.metric("💵 Cash disponible", f"${cash:,.2f}")
+m3.metric("📈 P&L total", f"${pnl:+,.2f}")
+m4.metric("🔄 Positions ouvertes", len(positions))
+m5.metric("📋 Trades exécutés", n_trades)
 
-    st.markdown(
-        f"""
-        <div style="
-            background:{style['bg']};
-            border:1px solid {style['border']};
-            border-left:4px solid {style['border']};
-            border-radius:8px;
-            padding:1rem 1.2rem;
-            margin-bottom:0.75rem;
-        ">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <span style="font-size:1.1rem;font-weight:700;color:#E6EDF3;">{style['icon']} {symbol}</span>
-                    <span style="margin-left:0.5rem;font-size:0.8rem;color:#8B949E;">{strategy_name}</span>
-                </div>
-                <div style="text-align:right;">
-                    <span style="font-size:1.3rem;font-weight:800;color:{style['text']};">{style['label']}</span>
-                    <div style="font-size:0.85rem;color:#8B949E;">${price:.2f}</div>
-                </div>
-            </div>
-            <div style="margin-top:0.6rem;">{badges_html}</div>
-            {reason_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ── Main analysis loop ────────────────────────────────────────────────────────
-if refresh:
-    st.cache_data.clear()
-
-st.markdown(f"*Dernière mise à jour : {datetime.now().strftime('%H:%M:%S')} — données {interval}*")
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Summary counters
-total_buy = 0
-total_sell = 0
-total_hold = 0
+# ── Two-column layout: equity curve + positions ────────────────────────────────
+col_chart, col_pos = st.columns([2, 1])
 
-all_results = []
+with col_chart:
+    st.markdown("#### 📈 Évolution du portefeuille")
+    if not equity_df.empty:
+        color = "#00C896" if total_value >= initial_cap else "#FF4B6E"
+        fig_eq = go.Figure()
+        fig_eq.add_trace(go.Scatter(
+            x=equity_df["timestamp"],
+            y=equity_df["total_value"],
+            mode="lines",
+            line=dict(color=color, width=2),
+            fill="tozeroy",
+            fillcolor=f"rgba({','.join(str(int(color[i:i+2], 16)) for i in (1,3,5))},0.1)",
+            name="Valeur portfolio",
+        ))
+        fig_eq.add_hline(y=initial_cap, line_dash="dash",
+                         line_color="rgba(255,255,255,0.3)",
+                         annotation_text=f"Capital initial ${initial_cap:,.0f}")
+        fig_eq.update_layout(
+            template="plotly_dark", paper_bgcolor="#0D1117", plot_bgcolor="#0D1117",
+            height=280, margin=dict(l=0, r=10, t=20, b=0),
+            font=dict(size=12), showlegend=False,
+        )
+        fig_eq.update_xaxes(gridcolor="#1E2530")
+        fig_eq.update_yaxes(gridcolor="#1E2530")
+        st.plotly_chart(fig_eq, use_container_width=True)
+    else:
+        st.info("Aucune donnée encore — le bot n'a pas encore effectué son premier tick.")
 
-for sym_label in selected_symbols:
-    symbol = SYMBOLS[sym_label]
-
-    with st.spinner(f"Chargement {symbol}…"):
-        df = load_live_data(symbol, interval, period)
-
-    if df.empty:
-        st.error(f"❌ Impossible de charger les données pour **{symbol}**")
-        continue
-
-    indicators = get_current_indicators(df)
-    last_idx = len(df) - 1
-
-    for strat_name in selected_strats:
-        strategy = STRATEGIES[strat_name]()
-        signal, reason = strategy.generate_signal(df, last_idx)
-
-        if signal == Signal.BUY:
-            total_buy += 1
-        elif signal == Signal.SELL:
-            total_sell += 1
-        else:
-            total_hold += 1
-
-        all_results.append({
-            "symbol": symbol,
-            "strategy": strat_name,
-            "signal": signal,
-            "reason": reason,
-            "indicators": indicators,
-        })
-
-# ── Summary metrics ───────────────────────────────────────────────────────────
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.metric("🟢 Signaux ACHAT", total_buy)
-with c2:
-    st.metric("🔴 Signaux VENTE", total_sell)
-with c3:
-    st.metric("⏸️ En Attente", total_hold)
-with c4:
-    total = total_buy + total_sell + total_hold
-    pct_active = round((total_buy + total_sell) / total * 100, 1) if total > 0 else 0
-    st.metric("Signaux actifs", f"{pct_active}%")
+with col_pos:
+    st.markdown("#### 🗂️ Positions ouvertes")
+    if positions:
+        for sym, pos in positions.items():
+            qty = pos.get("qty", 0)
+            avg = pos.get("avg_price", 0)
+            cur = pos.get("current_price", avg)
+            unrealized = (cur - avg) * qty
+            color = "#00C896" if unrealized >= 0 else "#FF4B6E"
+            st.markdown(
+                f"""
+                <div style="border:1px solid #30363D;border-left:4px solid {color};
+                            border-radius:6px;padding:0.7rem 1rem;margin-bottom:0.5rem;">
+                    <b style="color:#E6EDF3;">{sym}</b>
+                    <span style="float:right;color:{color};font-weight:700;">
+                        {'+' if unrealized >= 0 else ''}${unrealized:.2f}
+                    </span><br>
+                    <span style="color:#8B949E;font-size:0.82rem;">
+                        {qty:.4f} actions · Coût moy. ${avg:.2f} · Prix actuel ${cur:.2f}
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:
+        st.info("Aucune position ouverte pour l'instant.")
 
 st.markdown("---")
 
-# ── Signal cards by symbol ────────────────────────────────────────────────────
-# Group by symbol, show 3 columns
-sym_groups = {}
-for r in all_results:
-    sym_groups.setdefault(r["symbol"], []).append(r)
+# ── Current signals (what the bot sees RIGHT NOW) ──────────────────────────────
+st.markdown("#### 🧠 Signaux actuels du bot")
+st.caption("Ce que le bot analyserait s'il tournait maintenant sur les données les plus récentes.")
 
-n_cols = min(3, len(sym_groups))
-if n_cols == 0:
-    st.stop()
+strategy_cls = STRATEGY_MAP.get(strategy_live)
+sig_cols = st.columns(len(symbols_live))
 
-cols = st.columns(n_cols)
-for i, (symbol, results) in enumerate(sym_groups.items()):
-    with cols[i % n_cols]:
-        st.markdown(f"#### {symbol}")
-        close_price = results[0]["indicators"].get("close", 0) if results else 0
+for i, symbol in enumerate(symbols_live):
+    with sig_cols[i]:
+        try:
+            df_live = fetch_ohlcv(symbol, interval=active["interval"], period="3mo")
+            if df_live is not None and not df_live.empty:
+                df_live = add_all_indicators(df_live)
+                strategy_inst = strategy_cls() if strategy_cls else None
+                if strategy_inst:
+                    signal, reason = strategy_inst.generate_signal(df_live, len(df_live) - 1)
+                else:
+                    signal, reason = Signal.HOLD, "Stratégie inconnue"
+                style = SIGNAL_STYLE[signal]
+                price = float(df_live.iloc[-1]["close"])
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid {style['color']}33;border-left:4px solid {style['color']};
+                                border-radius:8px;padding:0.8rem;text-align:center;">
+                        <div style="font-size:1.8rem;">{style['icon']}</div>
+                        <div style="font-weight:700;color:{style['color']};font-size:1.1rem;">{style['label']}</div>
+                        <div style="color:#E6EDF3;font-size:0.9rem;margin-top:2px;">{symbol} — ${price:.2f}</div>
+                        <div style="color:#8B949E;font-size:0.78rem;margin-top:6px;font-style:italic;">{reason or 'En attente d\'un signal'}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.warning(f"Données indisponibles pour {symbol}")
+        except Exception as e:
+            st.error(f"{symbol}: {e}")
 
-        # Mini price chart
-        df_sym = load_live_data(symbol, interval, period)
-        if not df_sym.empty and len(df_sym) > 10:
-            recent = df_sym.tail(48)  # Last 48 bars
-            color = "#00C896" if recent["close"].iloc[-1] >= recent["close"].iloc[0] else "#FF4B6E"
-            fig_mini = go.Figure()
-            fig_mini.add_trace(go.Scatter(
-                x=recent.index,
-                y=recent["close"],
-                mode="lines",
-                line=dict(color=color, width=2),
-                fill="tozeroy",
-                fillcolor=f"{'rgba(0,200,150,0.1)' if color == '#00C896' else 'rgba(255,75,110,0.1)'}",
-            ))
-            fig_mini.update_layout(
-                height=120,
-                margin=dict(l=0, r=0, t=0, b=0),
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                showlegend=False,
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False),
-            )
-            st.plotly_chart(fig_mini, use_container_width=True)
-
-        for r in results:
-            render_signal_card(
-                symbol=r["symbol"],
-                strategy_name=r["strategy"],
-                signal=r["signal"],
-                reason=r["reason"],
-                indicators=r["indicators"],
-            )
-
-# ── Tableau récap ─────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("### 📋 Récapitulatif")
 
-if all_results:
-    recap_df = pd.DataFrame([{
-        "Symbole": r["symbol"],
-        "Stratégie": r["strategy"],
-        "Signal": f"{SIGNAL_COLORS[r['signal']]['icon']} {SIGNAL_COLORS[r['signal']]['label']}",
-        "Prix actuel": f"${r['indicators'].get('close', 0):.2f}",
-        "RSI": f"{r['indicators']['rsi']:.1f}" if r['indicators'].get('rsi') else "—",
-        "Raison": r["reason"] or "En attente",
-    } for r in all_results])
+# ── Recent trades ──────────────────────────────────────────────────────────────
+st.markdown("#### 📋 Derniers trades exécutés")
 
-    st.dataframe(recap_df, use_container_width=True, hide_index=True,
-                 column_config={"Raison": st.column_config.TextColumn("Raison", width="large")})
+if trades_df.empty:
+    st.info("Aucun trade exécuté pour l'instant. Le bot attend le prochain signal.")
+else:
+    display = trades_df.copy()
+    if "timestamp" in display.columns:
+        display["timestamp"] = pd.to_datetime(display["timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
+    if "pnl" in display.columns:
+        display["pnl"] = display["pnl"].apply(lambda x: f"${x:+.2f}" if pd.notna(x) else "—")
+    if "price" in display.columns:
+        display["price"] = display["price"].apply(lambda x: f"${x:.2f}")
+    if "fees" in display.columns:
+        display["fees"] = display["fees"].apply(lambda x: f"${x:.4f}")
+    if "quantity" in display.columns:
+        display["quantity"] = display["quantity"].apply(lambda x: f"{x:.4f}")
+
+    col_map = {
+        "timestamp": "Date/Heure", "symbol": "Symbole", "side": "Sens",
+        "quantity": "Quantité", "price": "Prix", "fees": "Frais",
+        "pnl": "P&L", "reason": "🤖 Raison",
+    }
+    cols_show = [c for c in ["timestamp", "symbol", "side", "quantity", "price", "fees", "pnl", "reason"]
+                 if c in display.columns]
+    display = display[cols_show].rename(columns=col_map)
+
+    st.dataframe(
+        display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "🤖 Raison": st.column_config.TextColumn("🤖 Raison", width="large"),
+            "Sens": st.column_config.TextColumn("Sens", width="small"),
+        },
+    )
+
+# ── Footer ─────────────────────────────────────────────────────────────────────
+st.markdown(
+    f"<div style='text-align:right;color:#8B949E;font-size:0.75rem;margin-top:1rem;'>"
+    f"Rafraîchissement auto toutes les 30s · "
+    f"Dernière vue : {datetime.now().strftime('%H:%M:%S')}"
+    f"</div>",
+    unsafe_allow_html=True,
+)
