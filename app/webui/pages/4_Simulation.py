@@ -33,10 +33,18 @@ STRATEGY_REGISTRY: dict[str, type] = {
     "SMA Crossover (20/50)": SmaCrossoverStrategy,
     "RSI (14) [30/70]": RsiStrategy,
     "MACD (12/26/9)": MacdStrategy,
+DEFAULT_SYMBOLS = {
+    "Apple (AAPL)": "AAPL",
+    "Nvidia (NVDA)": "NVDA",
+    "Tesla (TSLA)": "TSLA",
+    "Microsoft (MSFT)": "MSFT",
+    "Amazon (AMZN)": "AMZN",
+    "LVMH (MC.PA)": "MC.PA",
+    "TotalEnergies (TTE.PA)": "TTE.PA",
+    "Airbus (AIR.PA)": "AIR.PA",
+    "BNP Paribas (BNP.PA)": "BNP.PA",
+    "Sanofi (SAN.PA)": "SAN.PA",
 }
-
-DEFAULT_SYMBOLS = ["AAPL", "TSLA", "MSFT", "AMZN", "MC.PA", "TTE.PA"]
-INTERVALS = {"1 Heure": "1h", "Quotidien": "1d", "30 Minutes": "30m", "15 Minutes": "15m"}
 PERIODS = {
     "1 Mois": "1mo",
     "3 Mois": "3mo",
@@ -54,8 +62,9 @@ with st.form("simulation_form", clear_on_submit=False):
 
     with col1:
         st.markdown("### 📊 Actif et Stratégie")
-        symbol = st.selectbox("Symbole de l'actif", DEFAULT_SYMBOLS, key="sim_symbol")
-        custom_sym = st.text_input("Ticker personnalisé (remplace le choix)", placeholder="ex: NVDA", key="sim_custom")
+        symbol_label = st.selectbox("Société / Action", list(DEFAULT_SYMBOLS.keys()), key="sim_symbol")
+        symbol = DEFAULT_SYMBOLS[symbol_label]
+        custom_sym = st.text_input("Ou ticker personnalisé (ex: GOOG)", placeholder="Laissez vide pour utiliser le choix", key="sim_custom")
         strategy_name = st.selectbox("Stratégie", list(STRATEGY_REGISTRY.keys()), key="sim_strategy")
 
     with col2:

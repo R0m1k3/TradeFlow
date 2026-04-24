@@ -30,8 +30,18 @@ STRATEGY_REGISTRY = {
     # MACD is omitted to keep UI simple for now, can be added later
 }
 
-DEFAULT_SYMBOLS = ["AAPL", "TSLA", "MSFT", "AMZN", "MC.PA", "TTE.PA"]
-INTERVALS = {"1 Heure": "1h", "Quotidien": "1d", "30 Minutes": "30m"}
+DEFAULT_SYMBOLS = {
+    "Apple (AAPL)": "AAPL",
+    "Nvidia (NVDA)": "NVDA",
+    "Tesla (TSLA)": "TSLA",
+    "Microsoft (MSFT)": "MSFT",
+    "Amazon (AMZN)": "AMZN",
+    "LVMH (MC.PA)": "MC.PA",
+    "TotalEnergies (TTE.PA)": "TTE.PA",
+    "Airbus (AIR.PA)": "AIR.PA",
+    "BNP Paribas (BNP.PA)": "BNP.PA",
+    "Sanofi (SAN.PA)": "SAN.PA",
+}
 PERIODS = {"3 Mois": "3mo", "6 Mois": "6mo", "1 An": "1y", "2 Ans": "2y"}
 
 st.markdown("## ⚙️ Optimisation de Stratégies")
@@ -41,7 +51,8 @@ st.info("Trouvez automatiquement les meilleurs paramètres (Grid Search) pour ma
 with st.form("opt_form"):
     c1, c2, c3 = st.columns(3)
     with c1:
-        symbol = st.selectbox("Symbole", DEFAULT_SYMBOLS, key="opt_symbol")
+        symbol_label = st.selectbox("Société / Action", list(DEFAULT_SYMBOLS.keys()), key="opt_symbol")
+        symbol = DEFAULT_SYMBOLS[symbol_label]
         strategy_name = st.selectbox("Stratégie", list(STRATEGY_REGISTRY.keys()), key="opt_strat")
     with c2:
         interval_label = st.selectbox("Intervalle", list(INTERVALS.keys()), key="opt_interval")
