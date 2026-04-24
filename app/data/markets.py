@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -36,7 +36,7 @@ EXCHANGES = [
 def is_market_open(exchange: Exchange, now: Optional[datetime] = None) -> bool:
     """Check if a market is currently open."""
     if now is None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
     tz = ZoneInfo(exchange.tz)
     local_now = now.astimezone(tz)
     # Saturday=5, Sunday=6
@@ -55,7 +55,7 @@ def any_market_open(now: Optional[datetime] = None) -> bool:
 def next_market_event(now: Optional[datetime] = None) -> tuple[str, datetime]:
     """Return ('open'|'close', datetime) of the next market open or close event."""
     if now is None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
     if any_market_open(now):
         # Find the soonest close
         soonest = None

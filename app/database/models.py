@@ -6,7 +6,7 @@ Defines ORM tables: SimRun, Trade, Portfolio, PriceCache
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -70,7 +70,7 @@ class SimRun(Base):
     status: str = Column(String(16), default="completed", nullable=False)  # running|completed|stopped
     last_tick_at: datetime = Column(DateTime, nullable=True)
 
-    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    created_at: datetime = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     trades: list[Trade] = relationship("Trade", back_populates="sim_run", cascade="all, delete-orphan")

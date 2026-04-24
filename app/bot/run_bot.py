@@ -15,7 +15,7 @@ import os
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -68,7 +68,7 @@ def main() -> None:
     logger.info("Bot ready. Auto-starts when markets open, pauses when they close.")
 
     while running:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if any_market_open(now):
             # Markets are open — execute ticks

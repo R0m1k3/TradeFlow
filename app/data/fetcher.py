@@ -6,7 +6,7 @@ Fetches price data from yfinance with SQLite caching layer.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
@@ -201,7 +201,7 @@ def _load_from_cache(symbol: str, interval: str) -> Optional[pd.DataFrame]:
     """
     session = get_session()
     try:
-        cutoff = datetime.utcnow() - timedelta(hours=CACHE_MAX_AGE_HOURS)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=CACHE_MAX_AGE_HOURS)
 
         rows = (
             session.query(PriceCache)

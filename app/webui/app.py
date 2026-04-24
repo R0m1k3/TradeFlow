@@ -332,8 +332,8 @@ if any_open:
     summary_text = "Marches ouverts — le bot peut trader"
 else:
     event_type, event_time = next_market_event()
-    from datetime import datetime as _dt
-    now = _dt.utcnow()
+    from datetime import datetime as _dt, timezone
+    now = _dt.now(timezone.utc)
     wait_min = int(max(0, (event_time - now).total_seconds()) // 60)
     summary_color = "#8B949E"
     summary_text = f"Marches fermes — ouverture dans ~{wait_min} min"

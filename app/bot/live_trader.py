@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -150,7 +150,7 @@ class LiveTrader:
 
         signal, reason = strategy.generate_signal(df, last_idx)
         current_price = float(df.iloc[-1]["close"])
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
 
         logger.info(
             "%s → %s (%.2f) | %s",
@@ -278,7 +278,7 @@ class LiveTrader:
         try:
             snap = PortfolioModel(
                 sim_run_id=run_id,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 cash=self._portfolio.cash,
                 total_value=total_value,
                 positions_json=json.dumps(positions_data),
@@ -303,7 +303,7 @@ class LiveTrader:
         try:
             run = session.get(SimRun, run_id)
             if run:
-                run.last_tick_at = datetime.utcnow()
+                run.last_tick_at = datetime.now(timezone.utc)
                 session.commit()
         except SQLAlchemyError as exc:
             session.rollback()
@@ -340,7 +340,7 @@ def create_live_session(
             initial_capital=initial_capital,
             is_live=True,
             status="running",
-            start_date=datetime.utcnow().date().isoformat(),
+            start_date=datetime.now(timezone.utc).date().isoformat(),
         )
         session.add(run)
         session.commit()

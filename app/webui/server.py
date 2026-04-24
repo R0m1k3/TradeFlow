@@ -11,7 +11,7 @@ import os
 import signal
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -361,7 +361,7 @@ def get_bot_status():
     if pid is not None:
         try:
             with get_session() as session:
-                today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
                 trades_today = (
                     session.query(Trade)
                     .filter(Trade.timestamp >= today_start)
@@ -373,7 +373,7 @@ def get_bot_status():
         # Estimate uptime from PID file mtime
         try:
             mtime = BOT_PID_FILE.stat().st_mtime
-            uptime_seconds = int(datetime.utcnow().timestamp() - mtime)
+            uptime_seconds = int(datetime.now(timezone.utc).timestamp() - mtime)
             uptime = str(timedelta(seconds=uptime_seconds))
         except Exception:
             pass
@@ -583,7 +583,7 @@ def search_stocks(query: str = Query("", description="Search query"), limit: int
 @app.get("/api/health")
 def health():
     """Health check endpoint."""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
