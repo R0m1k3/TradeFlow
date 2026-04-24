@@ -317,7 +317,7 @@ for i, symbol in enumerate(symbols_live):
                         <div style="font-size:1.8rem;">{style['icon']}</div>
                         <div style="font-weight:700;color:{style['color']};font-size:1.1rem;">{style['label']}</div>
                         <div style="color:#E6EDF3;font-size:0.9rem;margin-top:2px;">{symbol} — ${price:.2f}</div>
-                        <div style="color:#8B949E;font-size:0.78rem;margin-top:6px;font-style:italic;">{reason or 'En attente d\'un signal'}</div>
+                        <div style="color:#8B949E;font-size:0.78rem;margin-top:6px;font-style:italic;">{reason or "En attente d'un signal"}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,

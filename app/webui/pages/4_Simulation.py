@@ -33,6 +33,7 @@ STRATEGY_REGISTRY: dict[str, type] = {
     "SMA Crossover (20/50)": SmaCrossoverStrategy,
     "RSI (14) [30/70]": RsiStrategy,
     "MACD (12/26/9)": MacdStrategy,
+}
 DEFAULT_SYMBOLS = {
     "Apple (AAPL)": "AAPL",
     "Nvidia (NVDA)": "NVDA",
