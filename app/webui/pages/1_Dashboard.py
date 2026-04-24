@@ -25,10 +25,7 @@ st.set_page_config(page_title="Tableau de Bord — TradeFlow", layout="wide", pa
 
 # ── Inject shared CSS ─────────────────────────────────────────────────────────
 st.markdown(
-    "<style>html,body,[class*='css']{font-family:'Inter',sans-serif!important;}"
-    ".main .block-container{padding:1.5rem 2rem;max-width:1600px;}"
-    "[data-testid='stMetric']{background:#1C2333;border:1px solid #30363D;border-radius:12px;padding:1rem 1.25rem;}"
-    "#MainMenu,footer,header{visibility:hidden;}</style>",
+    "<style>#MainMenu,footer,header{visibility:hidden;}</style>",
     unsafe_allow_html=True,
 )
 
@@ -146,16 +143,12 @@ with col_chart:
 with col_info:
     st.markdown(
         f"""
-        <div style="background:#1C2333;border:1px solid #30363D;border-radius:12px;padding:1.25rem;">
-            <div style="font-weight:600;margin-bottom:1rem;color:#E6EDF3;">Détails de la simulation</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Stratégie</div>
-            <div style="color:#00C896;font-weight:500;margin-bottom:0.8rem;">{selected_run.get('strategy','—')}</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Symbole</div>
-            <div style="color:#E6EDF3;font-weight:500;margin-bottom:0.8rem;">{selected_run.get('symbol','—')}</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Intervalle</div>
-            <div style="color:#E6EDF3;font-weight:500;margin-bottom:0.8rem;">{selected_run.get('interval','—')}</div>
-            <div style="font-size:0.82rem;color:#8B949E;margin-bottom:0.3rem;">Période</div>
-            <div style="color:#E6EDF3;font-weight:500;">{selected_run.get('start_date','—')} → {selected_run.get('end_date','—')}</div>
+        <div style="padding:1rem; border-radius:10px; background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);">
+            <h4 style="margin-top:0;">Détails de la simulation</h4>
+            <b>Stratégie :</b> <span style="color:#00C896;">{selected_run.get('strategy','—')}</span><br>
+            <b>Symbole :</b> {selected_run.get('symbol','—')}<br>
+            <b>Intervalle :</b> {selected_run.get('interval','—')}<br>
+            <b>Période :</b> {selected_run.get('start_date','—')} → {selected_run.get('end_date','—')}
         </div>
         """,
         unsafe_allow_html=True,

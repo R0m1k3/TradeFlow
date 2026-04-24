@@ -21,10 +21,7 @@ from app.webui.components.metrics import (
 
 st.set_page_config(page_title="Transactions — TradeFlow", layout="wide", page_icon="📋")
 st.markdown(
-    "<style>html,body,[class*='css']{font-family:'Inter',sans-serif!important;}"
-    ".main .block-container{padding:1.5rem 2rem;max-width:1600px;}"
-    "[data-testid='stMetric']{background:#1C2333;border:1px solid #30363D;border-radius:12px;padding:1rem 1.25rem;}"
-    "#MainMenu,footer,header{visibility:hidden;}</style>",
+    "<style>#MainMenu,footer,header{visibility:hidden;}</style>",
     unsafe_allow_html=True,
 )
 

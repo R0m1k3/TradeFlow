@@ -22,10 +22,7 @@ from app.webui.components.charts import build_equity_curve_chart
 
 st.set_page_config(page_title="Simulation — TradeFlow", layout="wide", page_icon="🚀")
 st.markdown(
-    "<style>html,body,[class*='css']{font-family:'Inter',sans-serif!important;}"
-    ".main .block-container{padding:1.5rem 2rem;max-width:1600px;}"
-    "[data-testid='stMetric']{background:#1C2333;border:1px solid #30363D;border-radius:12px;padding:1rem 1.25rem;}"
-    "#MainMenu,footer,header{visibility:hidden;}</style>",
+    "<style>#MainMenu,footer,header{visibility:hidden;}</style>",
     unsafe_allow_html=True,
 )
 
@@ -53,27 +50,32 @@ st.markdown("---")
 
 # ── Configuration form ────────────────────────────────────────────────────────
 with st.form("simulation_form", clear_on_submit=False):
-    st.markdown("### Configuration")
-
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
+        st.markdown("### 📊 Actif et Stratégie")
         symbol = st.selectbox("Symbole de l'actif", DEFAULT_SYMBOLS, key="sim_symbol")
         custom_sym = st.text_input("Ticker personnalisé (remplace le choix)", placeholder="ex: NVDA", key="sim_custom")
         strategy_name = st.selectbox("Stratégie", list(STRATEGY_REGISTRY.keys()), key="sim_strategy")
 
     with col2:
+        st.markdown("### ⏱️ Période et Capital")
         interval_label = st.selectbox("Intervalle (Bougies)", list(INTERVALS.keys()), key="sim_interval")
         period_label = st.selectbox("Période historique", list(PERIODS.keys()), index=1, key="sim_period")
         initial_capital = st.number_input(
             "Capital initial ($)", min_value=1000, max_value=10_000_000,
             value=10_000, step=1000, key="sim_capital"
         )
-
+    
+    st.divider()
+    
+    col3, col4 = st.columns(2)
     with col3:
-        st.markdown("**Paramètres du Courtier**")
+        st.markdown("### 🏦 Paramètres du Courtier")
         commission = st.slider("Commission (%)", 0.0, 1.0, 0.1, 0.01, key="sim_commission") / 100
         slippage = st.slider("Slippage (%)", 0.0, 0.5, 0.05, 0.005, key="sim_slippage") / 100
+    with col4:
+        st.markdown("### ⚙️ Gestion du risque")
         position_size = st.slider("Taille de la position (%)", 10, 100, 95, 5, key="sim_pos_size") / 100
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -140,43 +142,15 @@ if submitted:
         results.append(result)
 
         # ── Results display ────────────────────────────────────────────────
-        ret_color = "#00C896" if result.total_return_pct >= 0 else "#FF4B6E"
-        st.markdown(
-            f"""
-            <div style="background:#1C2333;border:1px solid #30363D;border-radius:12px;padding:1.25rem;margin:0.5rem 0;">
-                <div style="font-weight:600;font-size:1rem;margin-bottom:0.75rem;color:#E6EDF3;">
-                    Résultats {strat_name}
-                </div>
-                <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.75rem;text-align:center;">
-                    <div>
-                        <div style="font-size:0.72rem;color:#8B949E;text-transform:uppercase;">Valeur Finale</div>
-                        <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">${result.final_value:,.2f}</div>
-                    </div>
-                    <div>
-                        <div style="font-size:0.72rem;color:#8B949E;text-transform:uppercase;">Rendement</div>
-                        <div style="font-size:1.1rem;font-weight:600;color:{ret_color};">{result.total_return_pct:+.2f}%</div>
-                    </div>
-                    <div>
-                        <div style="font-size:0.72rem;color:#8B949E;text-transform:uppercase;">Sharpe</div>
-                        <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">{result.sharpe_ratio:.2f}</div>
-                    </div>
-                    <div>
-                        <div style="font-size:0.72rem;color:#8B949E;text-transform:uppercase;">Drawdown Max</div>
-                        <div style="font-size:1.1rem;font-weight:600;color:#FF4B6E;">-{result.max_drawdown_pct:.2f}%</div>
-                    </div>
-                    <div>
-                        <div style="font-size:0.72rem;color:#8B949E;text-transform:uppercase;">Taux de réussite</div>
-                        <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">{result.win_rate * 100:.1f}%</div>
-                    </div>
-                    <div>
-                        <div style="font-size:0.72rem;color:#8B949E;text-transform:uppercase;">Trades</div>
-                        <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">{result.total_trades}</div>
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.success(f"✅ Simulation terminée pour {strat_name} !")
+        
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Valeur Finale", f"${result.final_value:,.2f}")
+        m2.metric("Rendement", f"{result.total_return_pct:+.2f}%")
+        m3.metric("Ratio Sharpe", f"{result.sharpe_ratio:.2f}")
+        m4.metric("Drawdown Max", f"-{result.max_drawdown_pct:.2f}%")
+        m5.metric("Taux de réussite", f"{result.win_rate * 100:.1f}%")
+        m6.metric("Total Trades", result.total_trades)
 
         # Equity curve for this run
         if result.equity_curve:

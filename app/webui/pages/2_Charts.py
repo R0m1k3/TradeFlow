@@ -18,9 +18,7 @@ from app.webui.components.charts import build_candlestick_chart
 
 st.set_page_config(page_title="Graphiques — TradeFlow", layout="wide", page_icon="🕯️")
 st.markdown(
-    "<style>html,body,[class*='css']{font-family:'Inter',sans-serif!important;}"
-    ".main .block-container{padding:1.5rem 2rem;max-width:1600px;}"
-    "#MainMenu,footer,header{visibility:hidden;}</style>",
+    "<style>#MainMenu,footer,header{visibility:hidden;}</style>",
     unsafe_allow_html=True,
 )
 
