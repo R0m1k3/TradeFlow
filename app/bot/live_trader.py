@@ -20,6 +20,7 @@ from app.database.session import get_session, init_database
 from app.simulator.broker import ExecutedOrder, OrderSide, VirtualBroker
 from app.simulator.portfolio import Portfolio, Position
 from app.strategies.base import Signal
+from app.strategies.composite_strategy import CompositeStrategy
 from app.strategies.macd_strategy import MacdStrategy
 from app.strategies.rsi_strategy import RsiStrategy
 from app.strategies.sma_crossover import SmaCrossoverStrategy
@@ -27,6 +28,8 @@ from app.strategies.sma_crossover import SmaCrossoverStrategy
 logger = logging.getLogger(__name__)
 
 STRATEGY_MAP = {
+    "composite": CompositeStrategy,
+    "Composite [>0.7/<0.3]": CompositeStrategy,
     "sma_crossover": SmaCrossoverStrategy,
     "SMA Crossover (20/50)": SmaCrossoverStrategy,
     "rsi": RsiStrategy,
@@ -142,6 +145,7 @@ class LiveTrader:
             return
 
         df = add_all_indicators(df)
+        df.attrs["symbol"] = symbol  # Needed by CompositeStrategy for sentiment
         last_idx = len(df) - 1
 
         signal, reason = strategy.generate_signal(df, last_idx)

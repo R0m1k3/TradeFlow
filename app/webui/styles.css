@@ -1,0 +1,303 @@
+/* TradeFlow — Modern Dashboard Styles */
+
+/* ── Global ─────────────────────────────────────── */
+.tf-root {
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    color: #E6EDF3;
+}
+
+/* ── Header ─────────────────────────────────────── */
+.tf-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 0 0.5rem;
+}
+.tf-brand {
+    font-size: 1.6rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #00C896, #58A6FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 0.03em;
+}
+.tf-brand-sub {
+    font-size: 0.78rem;
+    color: #8B949E;
+    margin-left: 12px;
+}
+
+/* ── Status bar ─────────────────────────────────── */
+.tf-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #0d2b1e;
+    border: 1px solid #00C896;
+    border-radius: 10px;
+    padding: 0.6rem 1.2rem;
+    margin-bottom: 1.2rem;
+}
+.tf-status-dot {
+    width: 10px;
+    height: 10px;
+    background: #00C896;
+    border-radius: 50%;
+    animation: tf-pulse 2s infinite;
+}
+@keyframes tf-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+.tf-status-text {
+    font-weight: 700;
+    color: #00C896;
+}
+.tf-status-detail {
+    color: #8B949E;
+    font-size: 0.85rem;
+}
+
+/* ── Metrics row ─────────────────────────────────── */
+.tf-metric {
+    text-align: center;
+    padding: 1rem;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #1E2530;
+    border-radius: 12px;
+}
+.tf-metric-value {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #E6EDF3;
+    line-height: 1.2;
+}
+.tf-metric-value.positive { color: #00C896; }
+.tf-metric-value.negative { color: #FF4B6E; }
+.tf-metric-label {
+    font-size: 0.78rem;
+    color: #8B949E;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* ── Stock card ──────────────────────────────────── */
+.tf-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #1E2530;
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+.tf-card:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: #30363D;
+}
+.tf-card.buy { border-top: 3px solid #00C896; }
+.tf-card.sell { border-top: 3px solid #FF4B6E; }
+.tf-card.hold { border-top: 3px solid #FFB347; }
+
+.tf-card-symbol {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #E6EDF3;
+}
+.tf-card-price {
+    font-size: 0.85rem;
+    color: #8B949E;
+    margin-top: 2px;
+}
+
+/* ── Circular gauge (SVG) ────────────────────────── */
+.tf-gauge {
+    margin: 1rem auto 0.5rem;
+    position: relative;
+    width: 120px;
+    height: 120px;
+}
+.tf-gauge-bg {
+    fill: none;
+    stroke: #1E2530;
+    stroke-width: 8;
+}
+.tf-gauge-fill {
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s ease, stroke 0.5s ease;
+}
+.tf-gauge-score {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.6rem;
+    font-weight: 800;
+}
+
+/* ── Badge (Acheter / Attendre / Vendre) ─────────── */
+.tf-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-top: 6px;
+}
+.tf-badge-buy {
+    background: rgba(0,200,150,0.15);
+    color: #00C896;
+    border: 1px solid rgba(0,200,150,0.3);
+}
+.tf-badge-hold {
+    background: rgba(255,179,71,0.15);
+    color: #FFB347;
+    border: 1px solid rgba(255,179,71,0.3);
+}
+.tf-badge-sell {
+    background: rgba(255,75,110,0.15);
+    color: #FF4B6E;
+    border: 1px solid rgba(255,75,110,0.3);
+}
+
+/* ── Explanation text ────────────────────────────── */
+.tf-explain {
+    font-size: 0.82rem;
+    color: #8B949E;
+    line-height: 1.4;
+    margin-top: 8px;
+}
+
+/* ── Expandable detail ───────────────────────────── */
+.tf-detail-toggle {
+    font-size: 0.72rem;
+    color: #58A6FF;
+    cursor: pointer;
+    margin-top: 10px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/* ── Sub-score bars ──────────────────────────────── */
+.tf-sub-bar {
+    margin: 4px 0;
+}
+.tf-sub-bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: #8B949E;
+}
+.tf-sub-bar-track {
+    background: #1E2530;
+    border-radius: 3px;
+    height: 5px;
+    overflow: hidden;
+    margin-top: 2px;
+}
+.tf-sub-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+/* ── Position card ───────────────────────────────── */
+.tf-position {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #1E2530;
+    border-radius: 10px;
+    margin-bottom: 0.4rem;
+    background: rgba(255,255,255,0.02);
+}
+.tf-position.positive { border-left: 3px solid #00C896; }
+.tf-position.negative { border-left: 3px solid #FF4B6E; }
+.tf-position-symbol {
+    font-weight: 700;
+    color: #E6EDF3;
+}
+.tf-position-pnl {
+    font-weight: 700;
+}
+.tf-position-pnl.positive { color: #00C896; }
+.tf-position-pnl.negative { color: #FF4B6E; }
+.tf-position-detail {
+    color: #8B949E;
+    font-size: 0.75rem;
+}
+
+/* ── Trade log ───────────────────────────────────── */
+.tf-trade-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid #1E2530;
+    font-size: 0.85rem;
+}
+.tf-trade-row:last-child { border-bottom: none; }
+.tf-trade-side-buy {
+    color: #00C896;
+    font-weight: 700;
+    font-size: 0.78rem;
+}
+.tf-trade-side-sell {
+    color: #FF4B6E;
+    font-weight: 700;
+    font-size: 0.78rem;
+}
+.tf-trade-time { color: #8B949E; font-size: 0.78rem; }
+.tf-trade-symbol { font-weight: 600; color: #E6EDF3; }
+.tf-trade-qty { color: #8B949E; }
+.tf-trade-price { color: #E6EDF3; }
+.tf-trade-pnl { font-weight: 700; }
+.tf-trade-pnl.positive { color: #00C896; }
+.tf-trade-pnl.negative { color: #FF4B6E; }
+
+/* ── Config panel ────────────────────────────────── */
+.tf-config-panel {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #1E2530;
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+}
+
+/* ── Footer ──────────────────────────────────────── */
+.tf-footer {
+    text-align: right;
+    color: #8B949E;
+    font-size: 0.72rem;
+    margin-top: 1.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #1E2530;
+}
+
+/* ── Empty state ─────────────────────────────────── */
+.tf-empty {
+    text-align: center;
+    padding: 2rem;
+    color: #8B949E;
+}
+.tf-empty-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* ── Section titles ──────────────────────────────── */
+.tf-section {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #E6EDF3;
+    margin: 1.5rem 0 0.8rem;
+}
+.tf-section-sub {
+    font-size: 0.82rem;
+    color: #8B949E;
+    margin-bottom: 0.8rem;
+}
