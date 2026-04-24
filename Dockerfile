@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Security: run as non-root user
 RUN groupadd -r tradeflow && useradd -r -g tradeflow tradeflow

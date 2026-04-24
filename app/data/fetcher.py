@@ -90,30 +90,43 @@ def _fetch_from_yfinance(
     """
     try:
         ticker = yf.Ticker(symbol)
-        raw_df: pd.DataFrame = ticker.history(period=period, interval=interval)
+        # auto_adjust=True is default in yfinance >= 0.2.x — prices are split/dividend adjusted
+        raw_df: pd.DataFrame = ticker.history(period=period, interval=interval, auto_adjust=True)
 
-        if raw_df.empty:
+        if raw_df is None or raw_df.empty:
             logger.warning("yfinance returned empty data for %s [%s]", symbol, interval)
             return None
 
-        # Normalize column names to lowercase
-        raw_df = raw_df.rename(
-            columns={
-                "Open": "open",
-                "High": "high",
-                "Low": "low",
-                "Close": "close",
-                "Volume": "volume",
-            }
-        )
-        df = raw_df[["open", "high", "low", "close", "volume"]].copy()
+        # Normalize column names to lowercase (yfinance < 0.2.54 uses PascalCase,
+        # newer versions may use lowercase — handle both defensively)
+        raw_df.columns = [str(c).lower() for c in raw_df.columns]
+
+        # Select only OHLCV columns — ignore Dividends, Stock Splits, Capital Gains, etc.
+        required_cols = ["open", "high", "low", "close", "volume"]
+        missing = [c for c in required_cols if c not in raw_df.columns]
+        if missing:
+            logger.error(
+                "yfinance response missing columns %s for %s. Available: %s",
+                missing,
+                symbol,
+                list(raw_df.columns),
+            )
+            return None
+
+        df = raw_df[required_cols].copy()
 
         # Remove timezone info for SQLite compatibility
         if df.index.tz is not None:
             df.index = df.index.tz_convert("UTC").tz_localize(None)
 
+        # Cast all numeric columns to float (avoids numpy dtype issues)
+        df = df.astype(float)
         df = df.dropna()
         df = df[df["volume"] > 0]  # Remove bars with no volume (market closed)
+
+        if df.empty:
+            logger.warning("All bars filtered out for %s [%s] (no volume or all NaN)", symbol, interval)
+            return None
 
         _save_to_cache(symbol, interval, df)
         logger.info("Fetched %d bars for %s [%s]", len(df), symbol, interval)
