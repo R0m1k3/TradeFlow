@@ -42,6 +42,11 @@ DEFAULT_SYMBOLS = {
     "BNP Paribas (BNP.PA)": "BNP.PA",
     "Sanofi (SAN.PA)": "SAN.PA",
 }
+INTERVALS = {
+    "1 Jour": "1d",
+    "1 Heure": "1h",
+    "15 Minutes": "15m",
+}
 PERIODS = {"3 Mois": "3mo", "6 Mois": "6mo", "1 An": "1y", "2 Ans": "2y"}
 
 st.markdown("## ⚙️ Optimisation de Stratégies")

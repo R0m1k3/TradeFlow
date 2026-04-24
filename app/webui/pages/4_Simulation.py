@@ -46,6 +46,11 @@ DEFAULT_SYMBOLS = {
     "BNP Paribas (BNP.PA)": "BNP.PA",
     "Sanofi (SAN.PA)": "SAN.PA",
 }
+INTERVALS = {
+    "1 Jour": "1d",
+    "1 Heure": "1h",
+    "15 Minutes": "15m",
+}
 PERIODS = {
     "1 Mois": "1mo",
     "3 Mois": "3mo",
