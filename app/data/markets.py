@@ -101,26 +101,37 @@ def next_market_event(now: Optional[datetime] = None) -> tuple[str, datetime]:
 
 
 def get_market_status(exchange: Exchange) -> dict:
-    """Get status info for one exchange including index data."""
+    """Get status info for one exchange including index data and price change."""
     open_flag = is_market_open(exchange)
-    index_price = _fetch_index_price(exchange.index_ticker)
-    return {
+    index_data = _fetch_index_price(exchange.index_ticker)
+    result = {
         "name": exchange.name,
         "index_name": exchange.index_name,
         "index_ticker": exchange.index_ticker,
         "open": open_flag,
-        "price": index_price,
     }
+    if index_data is not None:
+        result["price"] = index_data["price"]
+        result["prev_close"] = index_data["prev_close"]
+    else:
+        result["price"] = None
+        result["prev_close"] = None
+    return result
 
 
-def _fetch_index_price(ticker: str) -> Optional[float]:
-    """Fetch the latest price for a market index."""
+def _fetch_index_price(ticker: str) -> Optional[dict]:
+    """Fetch the latest price and previous close for a market index.
+
+    Returns dict with 'price' and 'prev_close', or None on failure.
+    """
     try:
         import yfinance as yf
         t = yf.Ticker(ticker)
-        hist = t.history(period="1d")
+        hist = t.history(period="5d")
         if hist is not None and not hist.empty:
-            return float(hist.iloc[-1]["Close"])
+            price = float(hist.iloc[-1]["Close"])
+            prev_close = float(hist.iloc[-2]["Close"]) if len(hist) >= 2 else price
+            return {"price": price, "prev_close": prev_close}
     except Exception:
         pass
     return None

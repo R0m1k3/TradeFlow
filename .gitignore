@@ -17,6 +17,9 @@ env/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/bot.pid
+data/bot.log
+data/stock_names.json
 
 # Environment variables
 .env

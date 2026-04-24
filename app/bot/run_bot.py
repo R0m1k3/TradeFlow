@@ -56,8 +56,14 @@ def main() -> None:
         logger.info("Signal %s received — stopping.", sig)
         running = False
 
-    signal.signal(signal.SIGTERM, _handle_stop)
-    signal.signal(signal.SIGINT, _handle_stop)
+    try:
+        signal.signal(signal.SIGTERM, _handle_stop)
+    except AttributeError:
+        pass  # SIGTERM not available on Windows
+    try:
+        signal.signal(signal.SIGINT, _handle_stop)
+    except AttributeError:
+        pass
 
     logger.info("Bot ready. Auto-starts when markets open, pauses when they close.")
 

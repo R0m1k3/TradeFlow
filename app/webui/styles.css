@@ -405,3 +405,76 @@
     color: #8B949E;
     border: 1px solid rgba(139,148,158,0.2);
 }
+
+/* ── Stock table ────────────────────────────────── */
+.tf-table-wrapper {
+    overflow-x: auto;
+    margin-bottom: 1rem;
+    border: 1px solid #1E2530;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+}
+.tf-stock-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    font-size: 0.85rem;
+}
+.tf-stock-table thead th {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    color: #8B949E;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid #1E2530;
+    white-space: nowrap;
+}
+.tf-stock-table tbody td {
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid #1E2530;
+    color: #E6EDF3;
+    vertical-align: middle;
+}
+.tf-stock-table tbody tr:last-child td {
+    border-bottom: none;
+}
+.tf-stock-table tbody tr:hover {
+    background: rgba(255,255,255,0.04);
+}
+.tf-td-sym {
+    font-weight: 700;
+    font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+    white-space: nowrap;
+}
+.tf-td-name {
+    color: #8B949E;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+}
+.tf-td-price {
+    font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tf-td-change {
+    font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.tf-td-score {
+    font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+    font-weight: 700;
+    text-align: center;
+}
+.tf-td-signal {
+    text-align: center;
+}
+/* ── Market change indicator ────────────────────── */
+.tf-market-change {
+    margin-top: 2px;
+}

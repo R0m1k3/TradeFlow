@@ -9,6 +9,9 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import json
+import logging
+import signal
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -28,7 +31,6 @@ from app.database.session import get_session, init_database
 from app.strategies.base import Signal
 from app.strategies.composite_strategy import CompositeStrategy
 from app.webui.explanations import (
-    card_class, explain_score, explain_sub_score, format_pnl,
     pnl_class, pnl_color, score_color, signal_badge_class, signal_label,
 )
 
@@ -49,9 +51,80 @@ if _css_path.exists():
 st.markdown("<style>#MainMenu,footer,header{visibility:hidden;}</style>", unsafe_allow_html=True)
 
 # Stream auto-refresh: 15s interval, silent
-st_autorefresh(interval=15000, key="stream_refresh")
+st_autorefresh(interval=60000, key="stream_refresh")
 
 init_database()
+
+# ── Bot process management ───────────────────────────────────────────────────────
+# The bot runs as a separate subprocess. We track it via a PID file.
+
+BOT_PID_FILE = Path(__file__).resolve().parents[2] / "data" / "bot.pid"
+
+
+def _start_bot_process() -> None:
+    """Launch run_bot.py as a background subprocess and save its PID."""
+    if _get_bot_pid() is not None:
+        logger = logging.getLogger(__name__)
+        logger.info("Bot already running — skipping duplicate start")
+        return
+
+    bot_script = Path(__file__).resolve().parents[2] / "app" / "bot" / "run_bot.py"
+    log_dir = BOT_PID_FILE.parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "bot.log"
+    proc = subprocess.Popen(
+        [sys.executable, str(bot_script)],
+        stdout=open(log_file, "a", encoding="utf-8"),
+        stderr=subprocess.STDOUT,
+    )
+    BOT_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    BOT_PID_FILE.write_text(str(proc.pid), encoding="utf-8")
+
+
+def _stop_bot_process() -> None:
+    """Kill the bot subprocess and remove the PID file."""
+    pid = _get_bot_pid()
+    if pid is not None:
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        BOT_PID_FILE.unlink(missing_ok=True)
+
+
+def _get_bot_pid() -> int | None:
+    """Read the bot PID from the PID file. Returns None if missing or stale."""
+    if not BOT_PID_FILE.exists():
+        return None
+    try:
+        pid = int(BOT_PID_FILE.read_text(encoding="utf-8").strip())
+        # Verify the process is still alive
+        if sys.platform == "win32":
+            result = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
+                                    capture_output=True, text=True)
+            if str(pid) not in result.stdout:
+                BOT_PID_FILE.unlink(missing_ok=True)
+                return None
+        else:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                BOT_PID_FILE.unlink(missing_ok=True)
+                return None
+        return pid
+    except (ValueError, OSError):
+        BOT_PID_FILE.unlink(missing_ok=True)
+        return None
+
+
+# Clean up stale PID on startup
+if BOT_PID_FILE.exists():
+    if _get_bot_pid() is None:
+        BOT_PID_FILE.unlink(missing_ok=True)
+
 
 # ── Load tickers ────────────────────────────────────────────────────────────────
 
@@ -59,74 +132,86 @@ ALL_TICKERS = get_all_tickers()
 TICKER_DISPLAY = {sym: get_display_name(sym) for sym in ALL_TICKERS}
 
 
-# ── SVG Gauge builder ──────────────────────────────────────────────────────────
+# ── Stock table builder ──────────────────────────────────────────────────────────
 
-def gauge_svg(score: float, size: int = 120) -> str:
-    c = score_color(score)
-    r = (size - 16) / 2
-    cx, cy = size / 2, size / 2
-    circumference = 2 * 3.14159 * r
-    dashoffset = circumference * (1 - score)
-    label = signal_label(score)
+def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> str:
+    """Generate a self-contained HTML table of stock data.
+
+    Each row: Symbol, Company Name, Price, Change %, Score (0-1), Signal.
+    Uses the same color scheme as the rest of the dashboard.
+    """
+    rows_html = ""
+    for sym in symbols:
+        try:
+            df = fetch_ohlcv(sym, interval=interval, period=period)
+            if df is None or df.empty:
+                continue
+
+            df = add_all_indicators(df)
+            df.attrs["symbol"] = sym
+            score_data = compute_composite_score(df, sym)
+            score = score_data.combined
+            price = float(df.iloc[-1]["close"])
+
+            # Price change: compare last close to previous close
+            if len(df) >= 2:
+                prev_close = float(df.iloc[-2]["close"])
+                change_pct = ((price - prev_close) / prev_close) * 100
+            else:
+                change_pct = 0.0
+
+            display_name = get_display_name(sym)
+            currency = get_currency(sym)
+            price_str = format_price(price, currency)
+
+            # Direction arrow and color
+            if change_pct > 0:
+                arrow = "&#9650;"
+                change_color = "#00C896"
+            elif change_pct < 0:
+                arrow = "&#9660;"
+                change_color = "#FF4B6E"
+            else:
+                arrow = "&#9646;"
+                change_color = "#8B949E"
+
+            change_str = f"{change_pct:+.2f}%"
+
+            # Score and signal badge
+            badge_cls = signal_badge_class(score)
+            badge_label = signal_label(score)
+
+            rows_html += (
+                f'<tr>'
+                f'<td class="tf-td-sym">{sym}</td>'
+                f'<td class="tf-td-name">{display_name}</td>'
+                f'<td class="tf-td-price">{price_str}</td>'
+                f'<td class="tf-td-change" style="color:{change_color};">{arrow} {change_str}</td>'
+                f'<td class="tf-td-score" style="color:{score_color(score)};">{score:.2f}</td>'
+                f'<td class="tf-td-signal"><span class="tf-badge {badge_cls}">{badge_label}</span></td>'
+                f'</tr>'
+            )
+        except Exception:
+            continue
+
+    if not rows_html:
+        return '<div class="tf-empty">Aucune donnee disponible</div>'
+
     return (
-        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" class="tf-gauge">'
-        f'<circle class="tf-gauge-bg" cx="{cx}" cy="{cy}" r="{r}" stroke-dasharray="{circumference}" stroke-dashoffset="0" transform="rotate(-90 {cx} {cy})"/>'
-        f'<circle class="tf-gauge-fill" cx="{cx}" cy="{cy}" r="{r}" stroke="{c}" stroke-dasharray="{circumference}" stroke-dashoffset="{dashoffset}" transform="rotate(-90 {cx} {cy})"/>'
-        f'<text x="{cx}" y="{cy - 6}" text-anchor="middle" dominant-baseline="middle" fill="{c}" font-size="22" font-weight="800" font-family="Inter,sans-serif">{score:.2f}</text>'
-        f'<text x="{cx}" y="{cy + 14}" text-anchor="middle" dominant-baseline="middle" fill="{c}" font-size="10" font-weight="600" font-family="Inter,sans-serif">{label}</text>'
-        f'</svg>'
-    )
-
-
-def sub_bar_html(label: str, value: float, explanation: str = "") -> str:
-    c = score_color(value)
-    pct = value * 100
-    expl_text = f'<div class="tf-explain" style="font-size:0.7rem;margin-top:2px;">{explanation}</div>' if explanation else ""
-    return (
-        f'<div class="tf-sub-bar">'
-        f'<div class="tf-sub-bar-label"><span>{label}</span><span style="color:{c};font-weight:700;">{value:.2f}</span></div>'
-        f'<div class="tf-sub-bar-track"><div class="tf-sub-bar-fill" style="width:{pct}%;background:{c};"></div></div>'
-        f'{expl_text}'
-        f'</div>'
-    )
-
-
-def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = False) -> str:
-    s = score_data.combined
-    cc = card_class(s)
-    badge_cls = signal_badge_class(s)
-    badge_label = signal_label(s)
-    explain = explain_score(s)
-    display_name = get_display_name(symbol)
-    currency = get_currency(symbol)
-    price_str = format_price(price, currency)
-    detail_html = ""
-    if show_detail:
-        detail_html = (
-            f'<div style="border-top:1px solid #1E2530;margin-top:12px;padding-top:12px;text-align:left;">'
-            f'{sub_bar_html("Graphiques", score_data.technical, explain_sub_score("Technique", score_data.technical))}'
-            f'{sub_bar_html("Sentiment", score_data.sentiment, explain_sub_score("Sentiment", score_data.sentiment))}'
-            f'{sub_bar_html("Volume", score_data.momentum, explain_sub_score("Momentum", score_data.momentum))}'
-            f'<div style="border-top:1px solid #1E2530;margin-top:8px;padding-top:8px;">'
-            f'{sub_bar_html("RSI", score_data.rsi_score)}'
-            f'{sub_bar_html("MACD", score_data.macd_score)}'
-            f'{sub_bar_html("Bollinger", score_data.bollinger_score)}'
-            f'{sub_bar_html("Tendance", score_data.sma_score)}'
-            f'</div>'
-            f'<div style="display:flex;gap:12px;justify-content:center;margin-top:8px;font-size:0.7rem;color:#8B949E;">'
-            f'<span>Fear &amp; Greed: {score_data.fear_greed:.2f}</span>'
-            f'<span>News: {score_data.news_sentiment:.2f}</span>'
-            f'</div>'
-            f'</div>'
-        )
-    return (
-        f'<div class="tf-card {cc}">'
-        f'<div class="tf-card-symbol">{display_name}</div>'
-        f'<div class="tf-card-price">{price_str}</div>'
-        f'{gauge_svg(s, size=120)}'
-        f'<div class="tf-badge {badge_cls}">{badge_label}</div>'
-        f'<div class="tf-explain">{explain}</div>'
-        f'{detail_html}'
+        f'<div class="tf-table-wrapper">'
+        f'<table class="tf-stock-table">'
+        f'<thead>'
+        f'<tr>'
+        f'<th>Symbole</th>'
+        f'<th>Societe</th>'
+        f'<th>Prix</th>'
+        f'<th>Variation</th>'
+        f'<th>Score</th>'
+        f'<th>Signal</th>'
+        f'</tr>'
+        f'</thead>'
+        f'<tbody>{rows_html}</tbody>'
+        f'</table>'
         f'</div>'
     )
 
@@ -205,11 +290,33 @@ def market_card_html(status: dict) -> str:
     badge_label = "OUVERT" if is_open else "FERME"
     price = status.get("price")
     price_str = f"{price:,.2f} pts" if price is not None else "—"
+
+    # Price direction indicator
+    change_html = ""
+    if price is not None and status.get("prev_close") is not None and status["prev_close"] > 0:
+        prev = status["prev_close"]
+        change_pct = ((price - prev) / prev) * 100
+        if change_pct > 0:
+            arrow = "&#9650;"
+            chg_color = "#00C896"
+        elif change_pct < 0:
+            arrow = "&#9660;"
+            chg_color = "#FF4B6E"
+        else:
+            arrow = "&#9646;"
+            chg_color = "#8B949E"
+        change_html = (
+            f'<div class="tf-market-change" '
+            f'style="color:{chg_color};font-weight:700;font-size:0.85rem;margin-top:2px;">'
+            f'{arrow} {change_pct:+.2f}%</div>'
+        )
+
     return (
         f'<div class="tf-market-card {state_cls}">'
         f'<div class="tf-market-name">{status["name"]}</div>'
         f'<div class="tf-market-index">{status["index_name"]}</div>'
         f'<div class="tf-market-price">{price_str}</div>'
+        f'{change_html}'
         f'<div class="{badge_cls}">{badge_label}</div>'
         f'</div>'
     )
@@ -267,11 +374,13 @@ if gear_clicked:
             if st.button("▶ Demarrer le bot", use_container_width=True, type="primary",
                          disabled=(active_in_dialog is not None), key="dlg_start"):
                 run_id = create_live_session("composite", ALL_TICKERS, interval, capital)
+                _start_bot_process()
                 st.success(f"Session #{run_id} lancee avec {len(ALL_TICKERS)} actions !")
                 st.rerun()
         with c_stop:
             if st.button("■ Arreter le bot", use_container_width=True,
                          disabled=(active_in_dialog is None), key="dlg_stop"):
+                _stop_bot_process()
                 stop_live_session()
                 st.rerun()
 
@@ -279,18 +388,14 @@ if gear_clicked:
 
 st.markdown("---")
 
-# ── No active session: show all tickers in grid ─────────────────────────────────
+# ── No active session: show all tickers in table ────────────────────────────────
 
 if active is None:
     st.markdown('<div class="tf-section">Analyse en direct</div>', unsafe_allow_html=True)
     st.markdown('<div class="tf-section-sub">Apercu des scores — cliquez ⚙️ pour configurer et demarrer le bot</div>', unsafe_allow_html=True)
 
     # Search/filter
-    col_search, col_detail = st.columns([3, 1])
-    with col_search:
-        search_query = st.text_input("Rechercher une action", placeholder="ex: Apple, NVDA, LVMH...", key="ticker_search")
-    with col_detail:
-        show_detail_preview = st.checkbox("Voir les details", value=False, key="preview_detail")
+    search_query = st.text_input("Rechercher une action", placeholder="ex: Apple, NVDA, LVMH...", key="ticker_search")
 
     # Filter tickers based on search
     if search_query:
@@ -298,23 +403,9 @@ if active is None:
     else:
         filtered = ALL_TICKERS
 
-    # Render cards in rows of 5
-    for row_start in range(0, len(filtered), 5):
-        row_syms = filtered[row_start:row_start + 5]
-        card_cols = st.columns(len(row_syms))
-        for i, sym in enumerate(row_syms):
-            with card_cols[i]:
-                try:
-                    df = fetch_ohlcv(sym, interval="1h", period="3mo")
-                    if df is not None and not df.empty:
-                        df = add_all_indicators(df)
-                        df.attrs["symbol"] = sym
-                        score = compute_composite_score(df, sym)
-                        price = float(df.iloc[-1]["close"])
-                        st.markdown(stock_card_html(sym, price, score, show_detail=show_detail_preview),
-                                    unsafe_allow_html=True)
-                except Exception:
-                    pass
+    # Render table
+    if filtered:
+        st.markdown(stock_table_html(filtered, interval="1h", period="3mo"), unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown(
@@ -414,16 +505,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Stock score cards — ALL tickers ─────────────────────────────────────────────
+# ── Stock score table — ALL tickers ──────────────────────────────────────────────
 
 st.markdown('<div class="tf-section">Analyse par action</div>', unsafe_allow_html=True)
 st.markdown('<div class="tf-section-sub">Score de 0 (vendre) a 1 (acheter) — le bot agit au-dessus de 0.70 et en dessous de 0.30</div>', unsafe_allow_html=True)
 
-col_search2, col_detail2 = st.columns([3, 1])
-with col_search2:
-    live_search = st.text_input("Rechercher", placeholder="ex: Apple, NVDA, LVMH...", key="live_ticker_search")
-with col_detail2:
-    show_detail = st.checkbox("Voir les details", value=False, key="show_detail")
+live_search = st.text_input("Rechercher", placeholder="ex: Apple, NVDA, LVMH...", key="live_ticker_search")
 
 # Filter live symbols
 if live_search:
@@ -431,23 +518,9 @@ if live_search:
 else:
     display_syms = symbols_live
 
-# Render cards in rows of 5
-for row_start in range(0, len(display_syms), 5):
-    row_syms = display_syms[row_start:row_start + 5]
-    card_cols = st.columns(len(row_syms))
-    for i, symbol in enumerate(row_syms):
-        with card_cols[i]:
-            try:
-                df = fetch_ohlcv(symbol, interval=active["interval"], period="3mo")
-                if df is not None and not df.empty:
-                    df = add_all_indicators(df)
-                    df.attrs["symbol"] = symbol
-                    score = compute_composite_score(df, symbol)
-                    price = float(df.iloc[-1]["close"])
-                    st.markdown(stock_card_html(symbol, price, score, show_detail=show_detail),
-                                unsafe_allow_html=True)
-            except Exception:
-                pass
+# Render table
+if display_syms:
+    st.markdown(stock_table_html(display_syms, interval=active["interval"], period="3mo"), unsafe_allow_html=True)
 
 st.markdown("---")
 
