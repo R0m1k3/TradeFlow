@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy application code
 COPY config.yaml .
+COPY .streamlit/ ./.streamlit/
 COPY app/ ./app/
 
 # Create data directory for SQLite persistence

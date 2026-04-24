@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Maximum cache age before refreshing from API
 CACHE_MAX_AGE_HOURS: int = 4
 
-# Supported intervals and their minimum lookback periods
+# Supported intervals and their maximum lookback periods
 SUPPORTED_INTERVALS: dict[str, str] = {
     "1m": "7d",
     "5m": "60d",
@@ -30,6 +30,45 @@ SUPPORTED_INTERVALS: dict[str, str] = {
     "1h": "730d",
     "1d": "max",
 }
+
+
+def _cap_period(interval: str, period: str) -> str:
+    """Cap the lookback period to the maximum allowed for the given interval.
+
+    yfinance has tighter limits on shorter intervals (e.g. 15m max 60d).
+    """
+    max_period = SUPPORTED_INTERVALS.get(interval)
+    if max_period is None or max_period == "max":
+        return period
+
+    # Normalize both to days for comparison
+    period_days = _parse_period_to_days(period)
+    max_days = _parse_period_to_days(max_period)
+    if period_days is not None and max_days is not None and period_days > max_days:
+        return max_period
+    return period
+
+
+def _parse_period_to_days(period: str) -> int | None:
+    """Parse a yfinance period string to approximate number of days."""
+    period = period.strip().lower()
+    if period == "max":
+        return None
+    import re
+    m = re.match(r"(\d+)([dmoys])", period)
+    if not m:
+        return None
+    val = int(m.group(1))
+    unit = m.group(2)
+    if unit == "d":
+        return val
+    elif unit == "m":
+        return val * 30
+    elif unit == "o":
+        return val * 30  # month alias
+    elif unit == "y":
+        return val * 365
+    return None
 
 
 def fetch_ohlcv(
@@ -59,6 +98,9 @@ def fetch_ohlcv(
             f"Interval '{interval}' not supported. "
             f"Choose from: {list(SUPPORTED_INTERVALS.keys())}"
         )
+
+    # Cap period to the maximum allowed for this interval
+    period = _cap_period(interval, period)
 
     init_database()
 
