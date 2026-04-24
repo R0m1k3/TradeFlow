@@ -12,6 +12,7 @@ services:
       - tradeflow_data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
     restart: unless-stopped
     networks:
       - nginx_default

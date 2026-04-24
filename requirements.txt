@@ -16,6 +16,10 @@ fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
 
+# Real-time data
+finnhub-python>=2.4.20
+websocket-client>=1.8.0
+
 # Config
 PyYAML>=6.0.0
 

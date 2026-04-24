@@ -23,12 +23,16 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 import numpy as np
 import pandas as pd
 import yfinance as yf
+import asyncio
+import queue
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.analysis.composite import compute_composite_score
+from app.data.finnhub_client import subscribe_symbols, add_subscriber, remove_subscriber, get_all_prices
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
 from app.data.markets import (
@@ -578,6 +582,56 @@ def search_stocks(query: str = Query("", description="Search query"), limit: int
             for sym in results
         ]
     }
+
+
+@app.get("/api/prices/stream")
+async def stream_prices(symbols: str = Query(..., description="Comma-separated symbols")):
+    """
+    Server-Sent Events stream of live Finnhub trade prices.
+    Subscribe to: GET /api/prices/stream?symbols=AAPL,MSFT,MC.PA
+    Each event: data: {"symbol": "AAPL", "price": 182.5, "volume": 100, "ts": 1700000000000}
+    """
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    subscribe_symbols(sym_list)
+
+    # Seed with latest known prices immediately
+    snapshot = get_all_prices()
+
+    q: queue.Queue = queue.Queue(maxsize=200)
+
+    def on_trade(symbol: str, data: dict) -> None:
+        if symbol in sym_list:
+            try:
+                q.put_nowait({"symbol": symbol, **data})
+            except queue.Full:
+                pass
+
+    add_subscriber(on_trade)
+
+    async def event_generator():
+        try:
+            # Send current snapshot first
+            for sym in sym_list:
+                if sym in snapshot:
+                    d = snapshot[sym]
+                    yield f"data: {json.dumps({'symbol': sym, **d})}\n\n"
+            # Then stream live updates
+            while True:
+                try:
+                    msg = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: q.get(timeout=25)
+                    )
+                    yield f"data: {json.dumps(msg)}\n\n"
+                except Exception:
+                    yield ": heartbeat\n\n"
+        finally:
+            remove_subscriber(on_trade)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/health")

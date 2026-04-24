@@ -874,6 +874,27 @@ function signalLabel(s) {
 // HOOKS
 // ═══════════════════════════════════════════════════════════════
 
+// Live price stream via SSE — returns {symbol: {price, volume, ts}} map
+function useLivePrices(symbols) {
+  const [prices, setPrices] = useState({});
+  useEffect(() => {
+    if (!symbols || symbols.length === 0) return;
+    const url = `/api/prices/stream?symbols=${symbols.join(',')}`;
+    const es = new EventSource(url);
+    es.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d.symbol && d.price != null) {
+          setPrices(prev => ({ ...prev, [d.symbol]: d }));
+        }
+      } catch {}
+    };
+    es.onerror = () => es.close();
+    return () => es.close();
+  }, [symbols.join(',')]); // eslint-disable-line
+  return prices;
+}
+
 function useApi(fetcher, deps = []) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -995,6 +1016,10 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
   const [stocks, setStocks] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Live price stream
+  const symbols = useMemo(() => (stocks || []).map(s => s.sym), [stocks]);
+  const livePrices = useLivePrices(symbols);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -1189,7 +1214,10 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
         </thead>
         <tbody>
           {filtered.map(s => {
+            const live = livePrices[s.sym];
+            const livePrice = live ? live.price : s.price;
             const isUp = s.chg >= 0;
+            const liveIsUp = live ? livePrice >= s.price : isUp;
             const sparkData = s.sparkline || [];
             // Trend color based on sparkline shape (first vs last), not just today's chg
             const sparkTrend = sparkData.length >= 2
@@ -1209,7 +1237,9 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
                   </div>
                 </td>
                 <td className="company">{s.name}{s.sym !== s.name ? ` (${s.sym})` : ''}</td>
-                <td className="price tnum">{prefix}{fmt(s.price)}{suffix}</td>
+                <td className="price tnum" style={{ color: live ? (liveIsUp ? 'var(--up)' : 'var(--down)') : 'inherit', transition: 'color 0.4s' }}>
+                  {prefix}{fmt(livePrice)}{suffix}
+                </td>
                 <td>
                   <span className={`chg ${isUp ? 'up' : 'down'}`}>
                     <Icon name={isUp ? 'up' : 'down'} size={10} />
