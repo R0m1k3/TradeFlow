@@ -22,6 +22,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
+    __allow_unmapped__ = True
     pass
 
 
