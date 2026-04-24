@@ -28,8 +28,8 @@ class Exchange:
 EXCHANGES = [
     Exchange("Euronext Paris",  "Europe/Paris",   time(9, 0),  time(17, 30), "^FCHI", "CAC 40"),
     Exchange("Xetra Frankfurt", "Europe/Berlin",  time(9, 0),  time(17, 30), "^GDAXI", "DAX 40"),
-    Exchange("NASDAQ",          "US/Eastern",      time(9, 30), time(16, 0),  "^IXIC",  "NASDAQ"),
-    Exchange("NYSE",            "US/Eastern",      time(9, 30), time(16, 0),  "^DJI",   "Dow Jones"),
+    Exchange("NASDAQ",          "America/New_York",      time(9, 30), time(16, 0),  "^IXIC",  "NASDAQ"),
+    Exchange("NYSE",            "America/New_York",      time(9, 30), time(16, 0),  "^DJI",   "Dow Jones"),
 ]
 
 
