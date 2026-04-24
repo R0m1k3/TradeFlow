@@ -67,7 +67,7 @@ def next_market_event(now: Optional[datetime] = None) -> tuple[str, datetime]:
                     hour=ex.close_time.hour, minute=ex.close_time.minute, second=0, microsecond=0
                 )
                 if close_local > local_now:
-                    close_utc = close_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                    close_utc = close_local.astimezone(ZoneInfo("UTC"))
                     if soonest is None or close_utc < soonest:
                         soonest = close_utc
         return ("close", soonest) if soonest else ("close", now + timedelta(hours=1))
@@ -82,7 +82,7 @@ def next_market_event(now: Optional[datetime] = None) -> tuple[str, datetime]:
                 hour=ex.open_time.hour, minute=ex.open_time.minute, second=0, microsecond=0
             )
             if open_local > local_now and local_now.weekday() < 5:
-                open_utc = open_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                open_utc = open_local.astimezone(ZoneInfo("UTC"))
                 if soonest is None or open_utc < soonest:
                     soonest = open_utc
             else:
@@ -94,7 +94,7 @@ def next_market_event(now: Optional[datetime] = None) -> tuple[str, datetime]:
                 open_local = next_day.replace(
                     hour=ex.open_time.hour, minute=ex.open_time.minute, second=0, microsecond=0
                 )
-                open_utc = open_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                open_utc = open_local.astimezone(ZoneInfo("UTC"))
                 if soonest is None or open_utc < soonest:
                     soonest = open_utc
         return ("open", soonest) if soonest else ("open", now + timedelta(hours=8))
