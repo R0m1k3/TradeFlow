@@ -1,0 +1,238 @@
+"""
+TradeFlow — OHLCV Data Fetcher
+Fetches price data from yfinance with SQLite caching layer.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta
+from typing import Optional
+
+import pandas as pd
+import yfinance as yf
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.database.models import PriceCache
+from app.database.session import get_session, init_database
+
+logger = logging.getLogger(__name__)
+
+# Maximum cache age before refreshing from API
+CACHE_MAX_AGE_HOURS: int = 4
+
+# Supported intervals and their minimum lookback periods
+SUPPORTED_INTERVALS: dict[str, str] = {
+    "1m": "7d",
+    "5m": "60d",
+    "15m": "60d",
+    "30m": "60d",
+    "1h": "730d",
+    "1d": "max",
+}
+
+
+def fetch_ohlcv(
+    symbol: str,
+    interval: str = "1h",
+    period: str = "3mo",
+    use_cache: bool = True,
+) -> Optional[pd.DataFrame]:
+    """
+    Fetch OHLCV price data for a given symbol using yfinance, with SQLite caching.
+
+    Args:
+        symbol: Asset ticker symbol (e.g., 'AAPL', 'MC.PA').
+        interval: Bar interval — one of '1m', '5m', '15m', '30m', '1h', '1d'.
+        period: Lookback period string accepted by yfinance (e.g., '3mo', '1y').
+        use_cache: If True, attempts to serve data from SQLite cache first.
+
+    Returns:
+        DataFrame with columns [Open, High, Low, Close, Volume] indexed by datetime,
+        or None if the fetch fails.
+
+    Raises:
+        ValueError: If the interval is not supported.
+    """
+    if interval not in SUPPORTED_INTERVALS:
+        raise ValueError(
+            f"Interval '{interval}' not supported. "
+            f"Choose from: {list(SUPPORTED_INTERVALS.keys())}"
+        )
+
+    init_database()
+
+    if use_cache:
+        cached_df = _load_from_cache(symbol, interval)
+        if cached_df is not None and not cached_df.empty:
+            logger.info("Cache hit for %s [%s]", symbol, interval)
+            return cached_df
+
+    logger.info("Fetching %s [%s / %s] from yfinance…", symbol, interval, period)
+    return _fetch_from_yfinance(symbol, interval, period)
+
+
+def _fetch_from_yfinance(
+    symbol: str,
+    interval: str,
+    period: str,
+) -> Optional[pd.DataFrame]:
+    """
+    Download OHLCV data from yfinance and persist it to the SQLite cache.
+
+    Args:
+        symbol: Asset ticker symbol.
+        interval: Bar interval.
+        period: Lookback period.
+
+    Returns:
+        Cleaned DataFrame, or None on failure.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        raw_df: pd.DataFrame = ticker.history(period=period, interval=interval)
+
+        if raw_df.empty:
+            logger.warning("yfinance returned empty data for %s [%s]", symbol, interval)
+            return None
+
+        # Normalize column names to lowercase
+        raw_df = raw_df.rename(
+            columns={
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        )
+        df = raw_df[["open", "high", "low", "close", "volume"]].copy()
+
+        # Remove timezone info for SQLite compatibility
+        if df.index.tz is not None:
+            df.index = df.index.tz_convert("UTC").tz_localize(None)
+
+        df = df.dropna()
+        df = df[df["volume"] > 0]  # Remove bars with no volume (market closed)
+
+        _save_to_cache(symbol, interval, df)
+        logger.info("Fetched %d bars for %s [%s]", len(df), symbol, interval)
+        return df
+
+    except Exception as exc:
+        logger.error("Failed to fetch %s from yfinance: %s", symbol, exc)
+        return None
+
+
+def _load_from_cache(symbol: str, interval: str) -> Optional[pd.DataFrame]:
+    """
+    Load OHLCV data from SQLite cache if it is recent enough.
+
+    Args:
+        symbol: Asset ticker symbol.
+        interval: Bar interval.
+
+    Returns:
+        DataFrame from cache, or None if stale/missing.
+    """
+    session = get_session()
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=CACHE_MAX_AGE_HOURS)
+
+        rows = (
+            session.query(PriceCache)
+            .filter(
+                PriceCache.symbol == symbol,
+                PriceCache.interval == interval,
+                PriceCache.timestamp >= cutoff,
+            )
+            .order_by(PriceCache.timestamp.asc())
+            .all()
+        )
+
+        if not rows:
+            return None
+
+        records = [
+            {
+                "timestamp": row.timestamp,
+                "open": row.open,
+                "high": row.high,
+                "low": row.low,
+                "close": row.close,
+                "volume": row.volume,
+            }
+            for row in rows
+        ]
+
+        df = pd.DataFrame(records)
+        df = df.set_index("timestamp")
+        df.index = pd.DatetimeIndex(df.index)
+        return df
+
+    except SQLAlchemyError as exc:
+        logger.error("Cache read error for %s: %s", symbol, exc)
+        return None
+    finally:
+        session.close()
+
+
+def _save_to_cache(symbol: str, interval: str, df: pd.DataFrame) -> None:
+    """
+    Persist OHLCV DataFrame to SQLite PriceCache table.
+    Existing entries for this symbol/interval are replaced.
+
+    Args:
+        symbol: Asset ticker symbol.
+        interval: Bar interval.
+        df: OHLCV DataFrame indexed by datetime.
+    """
+    session = get_session()
+    try:
+        # Delete stale entries for this symbol/interval
+        session.query(PriceCache).filter(
+            PriceCache.symbol == symbol,
+            PriceCache.interval == interval,
+        ).delete()
+
+        cache_rows = [
+            PriceCache(
+                symbol=symbol,
+                interval=interval,
+                timestamp=idx.to_pydatetime() if hasattr(idx, "to_pydatetime") else idx,
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]),
+            )
+            for idx, row in df.iterrows()
+        ]
+
+        session.bulk_save_objects(cache_rows)
+        session.commit()
+        logger.debug("Cached %d rows for %s [%s]", len(cache_rows), symbol, interval)
+
+    except SQLAlchemyError as exc:
+        session.rollback()
+        logger.error("Failed to write cache for %s: %s", symbol, exc)
+    finally:
+        session.close()
+
+
+def get_available_symbols() -> list[str]:
+    """
+    Return the list of symbols currently stored in the price cache.
+
+    Returns:
+        Sorted list of unique symbol strings.
+    """
+    session = get_session()
+    try:
+        rows = session.query(PriceCache.symbol).distinct().all()
+        return sorted([row[0] for row in rows])
+    except SQLAlchemyError as exc:
+        logger.error("Could not query cached symbols: %s", exc)
+        return []
+    finally:
+        session.close()

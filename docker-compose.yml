@@ -1,0 +1,27 @@
+services:
+  tradeflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradeflow_app
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persist SQLite database across container restarts
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Override DB path if needed via env
+      # - DATABASE_PATH=/app/data/tradeflow.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+# Named volume for production deployments (alternative to bind mount)
+# volumes:
+#   tradeflow_data:
