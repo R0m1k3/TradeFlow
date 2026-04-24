@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
 TradeFlow — Live Bot Entry Point
-Runs the live trading loop continuously. Designed to run as a Docker service.
-
-The bot checks for an active live session in the DB each tick.
-If one is found, it executes trades. If not, it waits.
+Runs the live trading loop. Auto-starts when first market opens,
+pauses when last market closes.
 
 Tick interval is read from the BOT_TICK_SECONDS env var (default: 3600 = 1h).
 Set BOT_TICK_SECONDS=60 for testing (1-minute ticks).
@@ -17,12 +15,13 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
-# Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.bot.live_trader import LiveTrader
+from app.data.markets import any_market_open, next_market_event
 from app.database.session import init_database
 
 logging.basicConfig(
@@ -37,8 +36,8 @@ def main() -> None:
     tick_interval = int(os.environ.get("BOT_TICK_SECONDS", "3600"))
 
     logger.info("=" * 60)
-    logger.info("🤖  TradeFlow Live Bot starting")
-    logger.info("   Tick interval : %ds (%s)", tick_interval, _fmt_interval(tick_interval))
+    logger.info("TradeFlow Live Bot starting")
+    logger.info("   Tick interval : %ds", tick_interval)
     logger.info("=" * 60)
 
     init_database()
@@ -54,38 +53,46 @@ def main() -> None:
 
     def _handle_stop(sig, frame):
         nonlocal running
-        logger.info("Signal %s received — stopping after current tick.", sig)
+        logger.info("Signal %s received — stopping.", sig)
         running = False
 
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
 
-    logger.info("Bot ready. Waiting for an active live session (start one from the WebUI).")
+    logger.info("Bot ready. Auto-starts when markets open, pauses when they close.")
 
     while running:
-        try:
-            trader.tick()
-        except Exception as exc:
-            logger.error("Unhandled tick error: %s", exc, exc_info=True)
+        now = datetime.utcnow()
 
-        if not running:
-            break
+        if any_market_open(now):
+            # Markets are open — execute ticks
+            try:
+                trader.tick()
+                logger.info("Tick complete — markets open")
+            except Exception as exc:
+                logger.error("Unhandled tick error: %s", exc, exc_info=True)
 
-        logger.info("Sleeping %ds until next tick…", tick_interval)
-        # Sleep in small chunks so we react to SIGTERM quickly
-        deadline = time.monotonic() + tick_interval
-        while running and time.monotonic() < deadline:
-            time.sleep(1)
+            # Sleep until next tick
+            deadline = time.monotonic() + tick_interval
+            while running and time.monotonic() < deadline:
+                time.sleep(1)
+        else:
+            # Markets are closed — sleep until next market opens
+            event_type, event_time = next_market_event(now)
+            wait_seconds = max(1, (event_time - now).total_seconds())
+            wait_minutes = int(wait_seconds // 60)
+            logger.info(
+                "Marches fermes. Prochaine ouverture dans ~%d min (a %s UTC)",
+                wait_minutes,
+                event_time.strftime("%H:%M"),
+            )
 
-    logger.info("🛑  TradeFlow Bot stopped.")
+            # Sleep in chunks, checking every 30s
+            deadline = time.monotonic() + min(wait_seconds, 3600)
+            while running and time.monotonic() < deadline:
+                time.sleep(30)
 
-
-def _fmt_interval(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds}s"
-    if seconds < 3600:
-        return f"{seconds // 60}min"
-    return f"{seconds // 3600}h"
+    logger.info("TradeFlow Bot stopped.")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """
 TradeFlow — Modern Single-Page Trading Dashboard
-All NASDAQ stocks, stream refresh, beginner-friendly French UI.
+All NASDAQ + European stocks, stream refresh, beginner-friendly French UI.
+Config via gear icon modal. Every ticker gets a card.
 """
 
 import sys
@@ -21,6 +22,7 @@ from app.bot.live_trader import create_live_session, get_active_live_session, st
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
 from app.data.nasdaq import get_all_tickers, get_display_name, get_currency, format_price, format_price_sign, search_tickers
+from app.data.markets import get_all_market_statuses, any_market_open, next_market_event, EXCHANGES
 from app.database.models import Portfolio as PortfolioModel, SimRun, Trade
 from app.database.session import get_session, init_database
 from app.strategies.base import Signal
@@ -46,7 +48,7 @@ if _css_path.exists():
 
 st.markdown("<style>#MainMenu,footer,header{visibility:hidden;}</style>", unsafe_allow_html=True)
 
-# Stream auto-refresh: 15s interval, silent (no page flash)
+# Stream auto-refresh: 15s interval, silent
 st_autorefresh(interval=15000, key="stream_refresh")
 
 init_database()
@@ -55,9 +57,6 @@ init_database()
 
 ALL_TICKERS = get_all_tickers()
 TICKER_DISPLAY = {sym: get_display_name(sym) for sym in ALL_TICKERS}
-
-# Default selection
-DEFAULT_PICKS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA", "MC.PA"]
 
 
 # ── SVG Gauge builder ──────────────────────────────────────────────────────────
@@ -177,7 +176,9 @@ def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl:
     </div>"""
 
 
-# ── Header ─────────────────────────────────────────────────────────────────────
+# ── Header with gear icon ──────────────────────────────────────────────────────
+
+active = get_active_live_session()
 
 st.markdown("""
 <div class="tf-header">
@@ -188,79 +189,143 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-active = get_active_live_session()
+# Gear icon button for config modal
+col_title, col_gear = st.columns([10, 1])
+with col_gear:
+    gear_clicked = st.button("⚙️", key="gear_btn", help="Configuration")
 
-# ── Configuration ──────────────────────────────────────────────────────────────
+# ── Market overview cards ─────────────────────────────────────────────────────────
 
-with st.expander("Configuration", expanded=(active is None)):
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        capital = st.number_input("Capital de depart ($)", min_value=500, max_value=10_000_000,
-                                   value=10_000, step=500, key="cfg_capital")
-    with c2:
-        symbols = st.multiselect("Actions a surveiller", ALL_TICKERS,
-                                   default=[s for s in DEFAULT_PICKS if s in ALL_TICKERS],
-                                   format_func=lambda s: TICKER_DISPLAY.get(s, s),
-                                   key="cfg_symbols")
-        custom = st.text_input("Ajouter un ticker", placeholder="ex: COIN, ABNB, MC.PA", key="cfg_custom")
-        if custom:
-            for t in [x.strip().upper() for x in custom.split(",") if x.strip()]:
-                if t not in symbols:
-                    symbols.append(t)
-    with c3:
-        interval = st.selectbox("Frequence d'analyse", ["1h", "15m", "1d"],
-                                 format_func=lambda x: {"1h": "Toutes les heures", "15m": "Tous les 15 min", "1d": "Une fois par jour"}.get(x, x),
-                                 key="cfg_interval")
-    with c4:
-        st.markdown("<br>", unsafe_allow_html=True)
+@st.cache_data(ttl=60)
+def load_market_statuses() -> list[dict]:
+    return get_all_market_statuses()
+
+
+def market_card_html(status: dict) -> str:
+    is_open = status["open"]
+    state_cls = "open" if is_open else "closed"
+    badge_cls = "tf-market-badge open" if is_open else "tf-market-badge closed"
+    badge_label = "OUVERT" if is_open else "FERME"
+    price = status.get("price")
+    price_str = f"{price:,.2f} pts" if price is not None else "—"
+    return f"""
+    <div class="tf-market-card {state_cls}">
+        <div class="tf-market-name">{status['name']}</div>
+        <div class="tf-market-index">{status['index_name']}</div>
+        <div class="tf-market-price">{price_str}</div>
+        <div class="{badge_cls}">{badge_label}</div>
+    </div>"""
+
+
+market_statuses = load_market_statuses()
+markets_html = "".join(market_card_html(m) for m in market_statuses)
+any_open = any(m["open"] for m in market_statuses)
+
+# Market status summary
+if any_open:
+    summary_color = "#00C896"
+    summary_text = "Marches ouverts — le bot peut trader"
+else:
+    event_type, event_time = next_market_event()
+    from datetime import datetime as _dt
+    now = _dt.utcnow()
+    wait_min = int(max(0, (event_time - now).total_seconds()) // 60)
+    summary_color = "#8B949E"
+    summary_text = f"Marches fermes — ouverture dans ~{wait_min} min"
+
+st.markdown(f"""
+<div class="tf-market-grid">
+    {markets_html}
+</div>
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;">
+    <div style="width:8px;height:8px;background:{summary_color};border-radius:50%;{'animation:tf-pulse 2s infinite;' if any_open else ''}"></div>
+    <span style="color:{summary_color};font-size:0.85rem;font-weight:600;">{summary_text}</span>
+</div>
+<style>@keyframes tf-pulse{{0%,100%{{opacity:1}}50%{{opacity:0.3}}}}</style>
+""", unsafe_allow_html=True)
+
+# ── Config modal (opened by gear icon) ─────────────────────────────────────────
+
+if gear_clicked:
+    @st.dialog("Configuration", width="small")
+    def config_modal():
+        st.markdown("### Parametres du bot")
+        active_in_dialog = get_active_live_session()
+
+        c1, c2 = st.columns(2)
+        with c1:
+            capital = st.number_input("Capital de depart (€)", min_value=500, max_value=10_000_000,
+                                       value=10_000, step=500, key="dlg_capital")
+        with c2:
+            interval = st.selectbox("Frequence d'analyse", ["1h", "15m", "1d"],
+                                     format_func=lambda x: {"1h": "Toutes les heures", "15m": "Tous les 15 min", "1d": "Une fois par jour"}.get(x, x),
+                                     key="dlg_interval")
+
+        st.info(f"Le bot analysera les **{len(ALL_TICKERS)} actions** disponibles (NASDAQ + Europe).")
+        st.markdown(f"<div style='color:#8B949E;font-size:0.8rem;'>{len(ALL_TICKERS)} tickers : {', '.join(ALL_TICKERS[:12])}...</div>", unsafe_allow_html=True)
+
         c_start, c_stop = st.columns(2)
         with c_start:
-            if st.button("Demarrer le bot", use_container_width=True, type="primary",
-                         disabled=(active is not None)):
-                if not symbols:
-                    st.error("Choisissez au moins une action.")
-                else:
-                    run_id = create_live_session("composite", symbols, interval, capital)
-                    st.success(f"Session #{run_id} lancee !")
-                    st.rerun()
+            if st.button("▶ Demarrer le bot", use_container_width=True, type="primary",
+                         disabled=(active_in_dialog is not None), key="dlg_start"):
+                run_id = create_live_session("composite", ALL_TICKERS, interval, capital)
+                st.success(f"Session #{run_id} lancee avec {len(ALL_TICKERS)} actions !")
+                st.rerun()
         with c_stop:
-            if st.button("Arreter le bot", use_container_width=True, disabled=(active is None)):
+            if st.button("■ Arreter le bot", use_container_width=True,
+                         disabled=(active_in_dialog is None), key="dlg_stop"):
                 stop_live_session()
                 st.rerun()
 
+    config_modal()
+
 st.markdown("---")
 
-# ── No active session: show live preview ────────────────────────────────────────
+# ── No active session: show all tickers in grid ─────────────────────────────────
 
 if active is None:
     st.markdown('<div class="tf-section">Analyse en direct</div>', unsafe_allow_html=True)
-    st.markdown('<div class="tf-section-sub">Apercu des scores — aucune session active</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tf-section-sub">Apercu des scores — cliquez ⚙️ pour configurer et demarrer le bot</div>', unsafe_allow_html=True)
 
-    preview_symbols = symbols if symbols else DEFAULT_PICKS[:4]
-    cols = st.columns(min(len(preview_symbols), 4))
+    # Search/filter
+    col_search, col_detail = st.columns([3, 1])
+    with col_search:
+        search_query = st.text_input("Rechercher une action", placeholder="ex: Apple, NVDA, LVMH...", key="ticker_search")
+    with col_detail:
+        show_detail_preview = st.checkbox("Voir les details", value=False, key="preview_detail")
 
-    for i, sym in enumerate(preview_symbols[:4]):
-        with cols[i]:
-            try:
-                df = fetch_ohlcv(sym, interval=interval, period="3mo")
-                if df is not None and not df.empty:
-                    df = add_all_indicators(df)
-                    df.attrs["symbol"] = sym
-                    score = compute_composite_score(df, sym)
-                    price = float(df.iloc[-1]["close"])
-                    st.markdown(stock_card_html(sym, price, score), unsafe_allow_html=True)
-            except Exception:
-                st.warning(f"{sym}: erreur de chargement")
+    # Filter tickers based on search
+    if search_query:
+        filtered = search_tickers(search_query, limit=len(ALL_TICKERS))
+    else:
+        filtered = ALL_TICKERS
+
+    # Render cards in rows of 5
+    for row_start in range(0, len(filtered), 5):
+        row_syms = filtered[row_start:row_start + 5]
+        card_cols = st.columns(len(row_syms))
+        for i, sym in enumerate(row_syms):
+            with card_cols[i]:
+                try:
+                    df = fetch_ohlcv(sym, interval="1h", period="3mo")
+                    if df is not None and not df.empty:
+                        df = add_all_indicators(df)
+                        df.attrs["symbol"] = sym
+                        score = compute_composite_score(df, sym)
+                        price = float(df.iloc[-1]["close"])
+                        st.markdown(stock_card_html(sym, price, score, show_detail=show_detail_preview),
+                                    unsafe_allow_html=True)
+                except Exception:
+                    pass
 
     st.markdown("---")
     st.markdown("""
     <div class="tf-empty">
-        <div class="tf-empty-icon">1</div>
         <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">Comment ca marche ?</div>
         <div style="max-width:500px;margin:0.5rem auto;color:#8B949E;line-height:1.6;">
-            <b>1.</b> Choisissez votre capital de depart (en euros)<br>
-            <b>2.</b> Selectionnez les actions que le bot va surveiller<br>
-            <b>3.</b> Cliquez <b>Demarrer le bot</b> — il analyse le marche et trade automatiquement<br><br>
+            <b>1.</b> Cliquez sur ⚙️ en haut a droite pour configurer le capital<br>
+            <b>2.</b> Le bot analyse automatiquement toutes les actions disponibles<br>
+            <b>3.</b> Cliquez <b>Demarrer le bot</b> — il trade automatiquement<br><br>
             Le score va de <span style="color:#FF4B6E;">0 (vendre)</span> a
             <span style="color:#00C896;">1 (acheter)</span>. Quand le score depasse
             <b>0.70</b>, le bot achete. Quand il passe sous <b>0.30</b>, il vend.
@@ -281,7 +346,7 @@ st.markdown(f"""
     <div class="tf-status-dot"></div>
     <span class="tf-status-text">Bot actif</span>
     <span class="tf-status-detail">Session #{run_id}</span>
-    <span class="tf-status-detail">{', '.join(symbols_live)}</span>
+    <span class="tf-status-detail">{len(symbols_live)} actions</span>
     <span class="tf-status-detail">{active['interval']}</span>
     {"<span class='tf-status-detail'>Derniere analyse: " + (last_tick[:19].replace('T',' ') if last_tick else '—') + "</span>" if last_tick else ""}
 </div>
@@ -360,18 +425,26 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Stock score cards ──────────────────────────────────────────────────────────
+# ── Stock score cards — ALL tickers ─────────────────────────────────────────────
 
 st.markdown('<div class="tf-section">Analyse par action</div>', unsafe_allow_html=True)
 st.markdown('<div class="tf-section-sub">Score de 0 (vendre) a 1 (acheter) — le bot agit au-dessus de 0.70 et en dessous de 0.30</div>', unsafe_allow_html=True)
 
-show_detail = st.checkbox("Voir les details", value=False, key="show_detail")
+col_search2, col_detail2 = st.columns([3, 1])
+with col_search2:
+    live_search = st.text_input("Rechercher", placeholder="ex: Apple, NVDA, LVMH...", key="live_ticker_search")
+with col_detail2:
+    show_detail = st.checkbox("Voir les details", value=False, key="show_detail")
 
-strategy = CompositeStrategy()
+# Filter live symbols
+if live_search:
+    display_syms = [s for s in symbols_live if live_search.upper() in s or live_search.lower() in get_display_name(s).lower()]
+else:
+    display_syms = symbols_live
 
-# Render cards in rows of 4
-for row_start in range(0, len(symbols_live), 4):
-    row_syms = symbols_live[row_start:row_start + 4]
+# Render cards in rows of 5
+for row_start in range(0, len(display_syms), 5):
+    row_syms = display_syms[row_start:row_start + 5]
     card_cols = st.columns(len(row_syms))
     for i, symbol in enumerate(row_syms):
         with card_cols[i]:
@@ -385,7 +458,7 @@ for row_start in range(0, len(symbols_live), 4):
                     st.markdown(stock_card_html(symbol, price, score, show_detail=show_detail),
                                 unsafe_allow_html=True)
             except Exception:
-                st.warning(f"{symbol}: erreur")
+                pass
 
 st.markdown("---")
 
