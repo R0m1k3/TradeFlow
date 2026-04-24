@@ -1,6 +1,6 @@
 """
 TradeFlow — Modern Single-Page Trading Dashboard
-For beginners: configure capital, start the bot, watch scores & trades in real time.
+All NASDAQ stocks, stream refresh, beginner-friendly French UI.
 """
 
 import sys
@@ -14,11 +14,13 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 from app.analysis.composite import compute_composite_score
 from app.bot.live_trader import create_live_session, get_active_live_session, stop_live_session
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
+from app.data.nasdaq import get_nasdaq_tickers, search_tickers, TOP_NASDAQ
 from app.database.models import Portfolio as PortfolioModel, SimRun, Trade
 from app.database.session import get_session, init_database
 from app.strategies.base import Signal
@@ -43,24 +45,29 @@ if _css_path.exists():
     st.markdown(f"<style>{_css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
 st.markdown("<style>#MainMenu,footer,header{visibility:hidden;}</style>", unsafe_allow_html=True)
-st.markdown('<meta http-equiv="refresh" content="15">', unsafe_allow_html=True)
+
+# Stream auto-refresh: 15s interval, silent (no page flash)
+st_autorefresh(interval=15000, key="stream_refresh")
 
 init_database()
 
-DEFAULT_SYMBOLS = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "MC.PA", "TTE.PA", "AIR.PA"]
+# ── Load NASDAQ tickers ─────────────────────────────────────────────────────────
+
+NASDAQ_TICKERS = get_nasdaq_tickers()
+
+# Default selection: top NASDAQ by market cap
+DEFAULT_PICKS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOG", "META", "TSLA", "AMD"]
 
 
 # ── SVG Gauge builder ──────────────────────────────────────────────────────────
 
 def gauge_svg(score: float, size: int = 120) -> str:
-    """Build an SVG circular gauge for a 0-1 score."""
     c = score_color(score)
     r = (size - 16) / 2
     cx, cy = size / 2, size / 2
     circumference = 2 * 3.14159 * r
     dashoffset = circumference * (1 - score)
     label = signal_label(score)
-
     return f"""
     <svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" class="tf-gauge">
         <circle class="tf-gauge-bg" cx="{cx}" cy="{cy}" r="{r}"
@@ -77,7 +84,6 @@ def gauge_svg(score: float, size: int = 120) -> str:
 
 
 def sub_bar_html(label: str, value: float, explanation: str = "") -> str:
-    """Build a small sub-score bar with label and optional explanation."""
     c = score_color(value)
     pct = value * 100
     expl_text = f'<div class="tf-explain" style="font-size:0.7rem;margin-top:2px;">{explanation}</div>' if explanation else ""
@@ -94,13 +100,11 @@ def sub_bar_html(label: str, value: float, explanation: str = "") -> str:
 
 
 def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = False) -> str:
-    """Build a full stock card with gauge, badge, and explanation."""
     s = score_data.combined
     cc = card_class(s)
     badge_cls = signal_badge_class(s)
     badge_label = signal_label(s)
     explain = explain_score(s)
-
     detail_html = ""
     if show_detail:
         detail_html = f"""
@@ -119,7 +123,6 @@ def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = F
                 <span>News: {score_data.news_sentiment:.2f}</span>
             </div>
         </div>"""
-
     return f"""
     <div class="tf-card {cc}">
         <div class="tf-card-symbol">{symbol}</div>
@@ -132,7 +135,6 @@ def stock_card_html(symbol: str, price: float, score_data, show_detail: bool = F
 
 
 def position_card_html(symbol: str, qty: float, avg: float, cur: float) -> str:
-    """Build a position card with P&L."""
     unrealized = (cur - avg) * qty
     cls = pnl_class(unrealized)
     c = pnl_color(unrealized)
@@ -148,7 +150,6 @@ def position_card_html(symbol: str, qty: float, avg: float, cur: float) -> str:
 
 
 def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl: str = "", reason: str = "") -> str:
-    """Build a single trade log row."""
     side_cls = "tf-trade-side-buy" if side == "BUY" else "tf-trade-side-sell"
     side_label = "ACHAT" if side == "BUY" else "VENTE"
     pnl_html = ""
@@ -169,7 +170,7 @@ def trade_row_html(time: str, side: str, symbol: str, qty: str, price: str, pnl:
     </div>"""
 
 
-# ── Load CSS + header ───────────────────────────────────────────────────────────
+# ── Header ─────────────────────────────────────────────────────────────────────
 
 st.markdown("""
 <div class="tf-header">
@@ -190,9 +191,10 @@ with st.expander("Configuration", expanded=(active is None)):
         capital = st.number_input("Capital de depart ($)", min_value=500, max_value=10_000_000,
                                    value=10_000, step=500, key="cfg_capital")
     with c2:
-        symbols = st.multiselect("Actions a surveiller", DEFAULT_SYMBOLS,
-                                   default=["AAPL", "TSLA", "NVDA"], key="cfg_symbols")
-        custom = st.text_input("Ajouter un ticker", placeholder="ex: GOOG", key="cfg_custom")
+        symbols = st.multiselect("Actions NASDAQ", NASDAQ_TICKERS,
+                                   default=[s for s in DEFAULT_PICKS if s in NASDAQ_TICKERS],
+                                   key="cfg_symbols")
+        custom = st.text_input("Ajouter un ticker", placeholder="ex: COIN, ABNB, RIVN", key="cfg_custom")
         if custom:
             for t in [x.strip().upper() for x in custom.split(",") if x.strip()]:
                 if t not in symbols:
@@ -226,7 +228,7 @@ if active is None:
     st.markdown('<div class="tf-section">Analyse en direct</div>', unsafe_allow_html=True)
     st.markdown('<div class="tf-section-sub">Apercu des scores — aucune session active</div>', unsafe_allow_html=True)
 
-    preview_symbols = symbols if symbols else DEFAULT_SYMBOLS[:4]
+    preview_symbols = symbols if symbols else DEFAULT_PICKS[:4]
     cols = st.columns(min(len(preview_symbols), 4))
 
     for i, sym in enumerate(preview_symbols[:4]):
@@ -249,7 +251,7 @@ if active is None:
         <div style="font-size:1.1rem;font-weight:600;color:#E6EDF3;">Comment ca marche ?</div>
         <div style="max-width:500px;margin:0.5rem auto;color:#8B949E;line-height:1.6;">
             <b>1.</b> Choisissez votre capital de depart<br>
-            <b>2.</b> Selectionnez les actions que le bot va surveiller<br>
+            <b>2.</b> Selectionnez les actions NASDAQ que le bot va surveiller<br>
             <b>3.</b> Cliquez <b>Demarrer le bot</b> — il analyse le marche et trade automatiquement<br><br>
             Le score va de <span style="color:#FF4B6E;">0 (vendre)</span> a
             <span style="color:#00C896;">1 (acheter)</span>. Quand le score depasse
@@ -266,7 +268,6 @@ symbols_live = [s.strip() for s in active["symbol"].split(",")]
 initial_cap = active["initial_capital"]
 last_tick = active.get("last_tick_at")
 
-# Status bar
 st.markdown(f"""
 <div class="tf-status">
     <div class="tf-status-dot"></div>
@@ -359,26 +360,13 @@ st.markdown('<div class="tf-section-sub">Score de 0 (vendre) a 1 (acheter) — l
 show_detail = st.checkbox("Voir les details", value=False, key="show_detail")
 
 strategy = CompositeStrategy()
-card_cols = st.columns(min(len(symbols_live), 4))
 
-for i, symbol in enumerate(symbols_live[:4]):
-    with card_cols[i]:
-        try:
-            df = fetch_ohlcv(symbol, interval=active["interval"], period="3mo")
-            if df is not None and not df.empty:
-                df = add_all_indicators(df)
-                df.attrs["symbol"] = symbol
-                score = compute_composite_score(df, symbol)
-                price = float(df.iloc[-1]["close"])
-                st.markdown(stock_card_html(symbol, price, score, show_detail=show_detail),
-                            unsafe_allow_html=True)
-        except Exception:
-            st.warning(f"{sym}: erreur")
-
-if len(symbols_live) > 4:
-    extra_cols = st.columns(min(len(symbols_live) - 4, 4))
-    for i, symbol in enumerate(symbols_live[4:8]):
-        with extra_cols[i]:
+# Render cards in rows of 4
+for row_start in range(0, len(symbols_live), 4):
+    row_syms = symbols_live[row_start:row_start + 4]
+    card_cols = st.columns(len(row_syms))
+    for i, symbol in enumerate(row_syms):
+        with card_cols[i]:
             try:
                 df = fetch_ohlcv(symbol, interval=active["interval"], period="3mo")
                 if df is not None and not df.empty:
@@ -466,7 +454,6 @@ else:
         pnl_val = row.get("pnl", 0)
         pnl_str = f"${pnl_val:+,.2f}" if pd.notna(pnl_val) and side == "SELL" else ""
         reason = row.get("reason", "")
-        # Shorten the reason for display
         if reason and len(reason) > 60:
             reason = reason[:57] + "..."
         html_rows += trade_row_html(t, side, sym, qty, price, pnl_str, reason)
@@ -481,6 +468,6 @@ else:
 
 st.markdown(f"""
 <div class="tf-footer">
-    Rafraichissement automatique toutes les 15s &middot; Derniere mise a jour: {datetime.now().strftime('%H:%M:%S')}
+    Flux automatique &middot; Derniere mise a jour: {datetime.now().strftime('%H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
