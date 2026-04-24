@@ -1190,8 +1190,12 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
         <tbody>
           {filtered.map(s => {
             const isUp = s.chg >= 0;
-            const color = isUp ? 'var(--up)' : 'var(--down)';
             const sparkData = s.sparkline || [];
+            // Trend color based on sparkline shape (first vs last), not just today's chg
+            const sparkTrend = sparkData.length >= 2
+              ? sparkData[sparkData.length - 1] >= sparkData[0]
+              : isUp;
+            const color = sparkTrend ? 'var(--up)' : 'var(--down)';
             const currency = s.currency || 'USD';
             const prefix = currency === 'EUR' ? '' : '$';
             const suffix = currency === 'EUR' ? ' €' : '';
@@ -1215,7 +1219,12 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
                 <td>
                   <div className="spark-cell">
                     {sparkData.length > 0 ? (
-                      <Sparkline data={sparkData} color={color} width={110} height={30} fill />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Sparkline data={sparkData} color={color} width={80} height={30} fill />
+                        <span style={{ fontSize: 10, fontWeight: 500, color, whiteSpace: 'nowrap' }}>
+                          {sparkTrend ? '↑' : '↓'} {chgPrefix}{fmt(s.chg)}%
+                        </span>
+                      </div>
                     ) : (
                       <span style={{ color: 'var(--fg-4)', fontSize: 11 }}>—</span>
                     )}

@@ -327,8 +327,8 @@ def get_stock_history(
 ):
     """Return price history for charting."""
     range_map = {
-        "1J": ("1d", "5d"),
-        "1S": ("1h", "1mo"),
+        "1J": ("5m", "1d"),
+        "1S": ("1h", "5d"),
         "1M": ("1d", "1mo"),
         "3M": ("1d", "3mo"),
         "1A": ("1d", "1y"),
