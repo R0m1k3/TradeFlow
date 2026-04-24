@@ -7,8 +7,8 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # Persist SQLite database across container restarts
-      - ./data:/app/data
+      # Use a named volume instead of bind mount to preserve non-root permissions
+      - tradeflow_data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
       # Override DB path if needed via env
@@ -28,3 +28,5 @@ networks:
   nginx_default:
     external: true
 
+volumes:
+  tradeflow_data:
