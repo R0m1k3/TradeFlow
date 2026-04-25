@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.bot.live_trader import LiveTrader
+from app.bot.trader_v2 import TraderConfig, TraderV2
 from app.data.markets import any_market_open, next_market_event
 from app.database.session import init_database
 
@@ -30,6 +31,45 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("tradeflow.bot")
+
+
+def _build_trader():
+    """Build either v1 LiveTrader or v2 TraderV2 based on env."""
+    use_v2 = os.environ.get("BOT_VERSION", "v2").lower() == "v2"
+    if not use_v2:
+        logger.info("Using v1 LiveTrader (legacy)")
+        return LiveTrader(
+            commission_rate=float(os.environ.get("BOT_COMMISSION", "0.001")),
+            slippage_rate=float(os.environ.get("BOT_SLIPPAGE", "0.0005")),
+            position_size_pct=float(os.environ.get("BOT_POSITION_SIZE", "0.95")),
+            data_period=os.environ.get("BOT_DATA_PERIOD", "3mo"),
+        )
+
+    logger.info("Using v2 TraderV2 (regime + risk + meta-label)")
+    universe_str = os.environ.get(
+        "BOT_UNIVERSE",
+        "AAPL,MSFT,GOOG,AMZN,META,NVDA,SPY",
+    )
+    universe = [s.strip().upper() for s in universe_str.split(",") if s.strip()]
+
+    meta_path = os.environ.get("BOT_META_LABELER_PATH", "data/meta_labeler.pkl")
+    if not Path(meta_path).exists():
+        logger.warning("Meta-labeler not found at %s — running without it", meta_path)
+        meta_path = None
+
+    config = TraderConfig(
+        benchmark_symbol=os.environ.get("BOT_BENCHMARK", "SPY"),
+        use_meta_labeler=meta_path is not None,
+        meta_labeler_path=meta_path,
+        primary_strategy=os.environ.get("BOT_STRATEGY", "pullback_trend"),
+        universe=universe,
+        bars_period=os.environ.get("BOT_DATA_PERIOD", "1y"),
+        bars_interval=os.environ.get("BOT_INTERVAL", "1d"),
+        initial_capital=float(os.environ.get("BOT_INITIAL_CAPITAL", "10000")),
+        commission_rate=float(os.environ.get("BOT_COMMISSION", "0.001")),
+        slippage_rate=float(os.environ.get("BOT_SLIPPAGE", "0.0005")),
+    )
+    return TraderV2(config)
 
 
 def main() -> None:
@@ -42,12 +82,7 @@ def main() -> None:
 
     init_database()
 
-    trader = LiveTrader(
-        commission_rate=float(os.environ.get("BOT_COMMISSION", "0.001")),
-        slippage_rate=float(os.environ.get("BOT_SLIPPAGE", "0.0005")),
-        position_size_pct=float(os.environ.get("BOT_POSITION_SIZE", "0.95")),
-        data_period=os.environ.get("BOT_DATA_PERIOD", "3mo"),
-    )
+    trader = _build_trader()
 
     running = True
 
@@ -73,7 +108,17 @@ def main() -> None:
         if any_market_open(now):
             # Markets are open — execute ticks
             try:
-                trader.tick()
+                result = trader.tick()
+                if isinstance(result, dict) and result.get("actions"):
+                    for action in result["actions"]:
+                        logger.info("Action: %s", action)
+                if isinstance(result, dict) and "regime" in result:
+                    r = result["regime"]
+                    logger.info(
+                        "Regime=%s | exposure=%.1fx | vol=%.1f%%",
+                        r["regime"], r["exposure_multiplier"],
+                        r["realized_vol_annual"] * 100,
+                    )
                 logger.info("Tick complete — markets open")
             except Exception as exc:
                 logger.error("Unhandled tick error: %s", exc, exc_info=True)

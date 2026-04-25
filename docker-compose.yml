@@ -42,11 +42,21 @@ services:
       - tradeflow_data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
-      - BOT_TICK_SECONDS=3600     # Change to 60 for testing
+      # Bot version: v1 (legacy) or v2 (regime + risk + meta-label, recommended)
+      - BOT_VERSION=v2
+      - BOT_TICK_SECONDS=3600
       - BOT_COMMISSION=0.001
       - BOT_SLIPPAGE=0.0005
+      # v2 settings
+      - BOT_UNIVERSE=AAPL,MSFT,GOOG,AMZN,META,NVDA,SPY
+      - BOT_BENCHMARK=SPY
+      - BOT_STRATEGY=pullback_trend
+      - BOT_INITIAL_CAPITAL=10000
+      - BOT_INTERVAL=1d
+      - BOT_DATA_PERIOD=1y
+      - BOT_META_LABELER_PATH=data/meta_labeler.pkl
+      # v1 legacy (only if BOT_VERSION=v1)
       - BOT_POSITION_SIZE=0.95
-      - BOT_DATA_PERIOD=3mo
     restart: unless-stopped
     depends_on:
       - tradeflow

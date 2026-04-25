@@ -992,6 +992,123 @@ function ThemeToggle({ theme, setTheme }) {
 // STATUS PILL
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// RISK PANEL (v2)
+// ═══════════════════════════════════════════════════════════════
+
+function RiskPanel() {
+  const [regime, setRegime] = useState(null);
+  const [risk, setRisk] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [r, k] = await Promise.all([
+        apiFetch('/api/v2/regime?benchmark=SPY').catch(() => null),
+        apiFetch('/api/v2/risk/status').catch(() => null),
+      ]);
+      setRegime(r);
+      setRisk(k);
+    } catch {}
+  }, []);
+
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+
+  const toggleKillSwitch = async () => {
+    if (!risk) return;
+    setBusy(true);
+    try {
+      const active = risk.kill_switch_active;
+      const url = '/api/v2/risk/kill-switch';
+      await apiFetch(url, { method: active ? 'DELETE' : 'POST' });
+      await load();
+    } catch (e) { console.error(e); }
+    setBusy(false);
+  };
+
+  if (!regime && !risk) return null;
+
+  const regimeColor = !regime ? 'var(--fg-4)'
+    : regime.regime === 'bull_calm' ? 'var(--up)'
+    : regime.regime === 'bull_vol' ? '#FFB020'
+    : 'var(--down)';
+
+  const regimeLabel = !regime ? '—'
+    : regime.regime === 'bull_calm' ? 'Bullish calme'
+    : regime.regime === 'bull_vol' ? 'Bullish volatil'
+    : 'Bearish';
+
+  const breaker = risk?.circuit_breaker;
+  const halted = breaker?.halted || risk?.kill_switch_active;
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(4, 1fr)',
+      gap: 12,
+      marginBottom: 20,
+      padding: '14px 16px',
+      background: 'var(--bg-elev)',
+      border: '0.5px solid var(--hairline)',
+      borderRadius: 12,
+      borderLeft: `3px solid ${halted ? 'var(--down)' : regimeColor}`,
+    }}>
+      <div>
+        <div className="eyebrow">Régime de marché</div>
+        <div style={{ fontSize: 14, fontWeight: 500, color: regimeColor, marginTop: 4 }}>
+          {regimeLabel}
+        </div>
+        {regime && (
+          <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>
+            Vol {(regime.realized_vol_annual * 100).toFixed(1)}% · pct {(regime.vol_percentile * 100).toFixed(0)}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="eyebrow">Exposition autorisée</div>
+        <div style={{ fontSize: 14, fontWeight: 500, marginTop: 4 }}>
+          {regime ? `${(regime.exposure_multiplier * 100).toFixed(0)}%` : '—'}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>
+          du sizing nominal
+        </div>
+      </div>
+
+      <div>
+        <div className="eyebrow">Circuit Breaker</div>
+        <div style={{
+          fontSize: 14,
+          fontWeight: 500,
+          color: halted ? 'var(--down)' : 'var(--up)',
+          marginTop: 4,
+        }}>
+          {halted ? '🛑 HALTED' : '✓ Actif'}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>
+          {breaker?.tripped_level || 'aucun déclenchement'}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <button
+          className="btn"
+          disabled={busy}
+          onClick={toggleKillSwitch}
+          style={{
+            background: risk?.kill_switch_active ? 'var(--down)' : 'transparent',
+            color: risk?.kill_switch_active ? 'white' : 'var(--down)',
+            border: '1px solid var(--down)',
+            fontWeight: 500,
+          }}
+        >
+          {risk?.kill_switch_active ? 'Réactiver bot' : '🛑 Kill Switch'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function StatusPill({ open }) {
   return (
     <span className="status-pill">
@@ -1164,6 +1281,8 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
         <span style={{ color: 'var(--fg-4)' }}>·</span>
         <span>Le bot peut trader pendant les sessions actives</span>
       </p>
+
+      <RiskPanel />
 
       {/* Section header */}
       <div className="section-head">
