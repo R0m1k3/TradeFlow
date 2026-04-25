@@ -167,14 +167,16 @@ def get_markets():
         chg = None
         try:
             idx = yf.Ticker(ex.index_ticker)
-            hist = idx.history(period="2d", interval="1d")
+            hist = idx.history(period="5d", interval="1d")
             if hist is not None and not hist.empty:
-                val = float(hist.iloc[-1]["close"])
+                # Normalize column names (yfinance uses PascalCase by default)
+                close_col = "Close" if "Close" in hist.columns else "close"
+                val = float(hist.iloc[-1][close_col])
                 if len(hist) >= 2:
-                    prev = float(hist.iloc[-2]["close"])
+                    prev = float(hist.iloc[-2][close_col])
                     chg = round(((val - prev) / prev) * 100, 2)
         except Exception as exc:
-            logger.warning("Failed to fetch index %s: %s", ex.index_ticker, exc)
+            logger.warning("Failed to fetch index %s: %s", ex.index_ticker, exc, exc_info=True)
 
         results.append({
             "exch": ex.name.upper(),
