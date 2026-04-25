@@ -1144,7 +1144,7 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
     try {
       const [m, s] = await Promise.all([
         apiFetch('/api/markets'),
-        apiFetch('/api/stocks?limit=50'),
+        apiFetch('/api/stocks?limit=200'),
       ]);
       setMarkets(m);
       setStocks(s.stocks);

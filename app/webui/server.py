@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -199,7 +200,7 @@ def get_stocks(
     query: str = Query("", description="Search query"),
     sort_by: str = Query("score", description="Sort field"),
     sort_dir: str = Query("desc", description="Sort direction"),
-    limit: int = Query(50, description="Max results"),
+    limit: int = Query(200, description="Max results"),
 ):
     """Return stock list with scores, signals, and sparklines."""
     if query:
@@ -207,34 +208,28 @@ def get_stocks(
     else:
         symbols = get_all_tickers()[:limit]
 
-    stocks = []
-    errors = []
     interval = "1d"
     period = "3mo"
 
-    for sym in symbols:
+    def _fetch_symbol(sym: str):
         try:
             df = fetch_ohlcv(sym, interval=interval, period=period)
             if df is None or df.empty:
-                continue
-
+                return None, None
             df = add_all_indicators(df)
             df.attrs["symbol"] = sym
             score_data = compute_composite_score(df, sym)
             price = float(df.iloc[-1]["close"])
-
             if len(df) >= 2:
                 prev_close = float(df.iloc[-2]["close"])
                 chg = round(((price - prev_close) / prev_close) * 100, 2)
             else:
                 chg = 0.0
-
             prices = df["close"].tolist()
             sparkline = _compute_sparkline(prices, 32)
             sig = _compute_signal(score_data.combined)
             name, curr = STOCK_INFO.get(sym, (sym, "USD"))
-
-            stocks.append({
+            return {
                 "sym": sym,
                 "name": name,
                 "price": round(price, 2),
@@ -243,10 +238,20 @@ def get_stocks(
                 "signal": sig,
                 "currency": curr,
                 "sparkline": [round(float(v), 2) for v in sparkline],
-            })
+            }, None
         except Exception as exc:
-            errors.append({"sym": sym, "error": str(exc)})
-            continue
+            return None, {"sym": sym, "error": str(exc)}
+
+    stocks = []
+    errors = []
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        futures = {pool.submit(_fetch_symbol, sym): sym for sym in symbols}
+        for fut in as_completed(futures):
+            result, err = fut.result()
+            if result:
+                stocks.append(result)
+            elif err:
+                errors.append(err)
 
     # Sort
     reverse = sort_dir.lower() != "asc"
