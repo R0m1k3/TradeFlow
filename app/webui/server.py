@@ -641,6 +641,56 @@ def health():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
+# TRADER V2 — Risk / Regime / Strategy stack
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/api/v2/regime")
+def get_regime(benchmark: str = Query("SPY")):
+    """Current market regime signal from the benchmark index."""
+    try:
+        from app.regime.detector import RegimeDetector
+        df = fetch_ohlcv(benchmark, interval="1d", period="2y")
+        if df is None or df.empty:
+            raise HTTPException(404, f"no data for {benchmark}")
+        signal = RegimeDetector().detect(df["close"])
+        return {"benchmark": benchmark, **signal.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/v2/risk/status")
+def get_risk_status():
+    """Read-only snapshot of the risk manager configuration & breaker state."""
+    try:
+        from app.risk.manager import RiskManager
+        rm = RiskManager()
+        return rm.status()
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/api/v2/risk/kill-switch")
+def activate_kill_switch(reason: str = Query("manual halt via API")):
+    """Activate the emergency kill switch (halts all trading)."""
+    from app.risk.kill_switch import KillSwitch
+    ks = KillSwitch()
+    ks.activate(reason)
+    return {"active": ks.is_active, "reason": ks.reason}
+
+
+@app.delete("/api/v2/risk/kill-switch")
+def deactivate_kill_switch():
+    """Deactivate the kill switch (resume trading)."""
+    from app.risk.kill_switch import KillSwitch
+    ks = KillSwitch()
+    ks.deactivate()
+    return {"active": ks.is_active}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
 # STATIC FILES
 # ═══════════════════════════════════════════════════════════════════════════════════
 
