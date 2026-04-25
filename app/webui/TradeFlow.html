@@ -4,65 +4,100 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>TradeFlow — Analyse automatique du marché</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23BF5AF2'/><path d='M8 22 14 14 19 18 25 10' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%235AFF8C'/><path d='M8 22 14 14 19 18 25 10' stroke='%23042a14' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=Inter+Tight:wght@500;600;700&display=swap" rel="stylesheet">
 
-<!-- Design Tokens & Base Styles -->
 <style>
 :root {
-  --accent: #BF5AF2;
-  --accent-soft: rgba(191, 90, 242, 0.12);
-  --accent-ring: rgba(191, 90, 242, 0.35);
-  --up: #30D158;
-  --down: #FF453A;
-  --up-soft: rgba(48, 209, 88, 0.12);
-  --down-soft: rgba(255, 69, 58, 0.12);
+  --accent: #5AFF8C;
+  --accent-2: #1FD968;
+  --accent-soft: rgba(90, 255, 140, 0.14);
+  --accent-ring: rgba(90, 255, 140, 0.40);
+  --accent-glow: 0 8px 28px rgba(48, 220, 110, 0.45), 0 2px 8px rgba(31, 217, 104, 0.35);
+  --up: #2FD66B;
+  --down: #FF4D5E;
+  --up-hex: #2FD66B;
+  --down-hex: #FF4D5E;
+  --up-soft: rgba(48, 209, 88, 0.16);
+  --down-soft: rgba(255, 69, 58, 0.14);
 
-  --bg: #fafaf9;
+  /* Light glossy */
+  --bg: #f1f2f6;
+  --bg-grad: radial-gradient(ellipse 80% 60% at 50% -10%, #ffffff 0%, #eef0f5 45%, #e6e9f0 100%);
   --bg-elev: #ffffff;
-  --bg-tint: #f4f4f2;
+  --bg-elev-grad: linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(252,252,254,1) 100%);
+  --bg-tint: #f4f4f6;
   --fg: #0a0a0a;
   --fg-2: #3a3a3a;
   --fg-3: #6e6e73;
   --fg-4: #9a9a9e;
-  --hairline: rgba(0, 0, 0, 0.08);
-  --hairline-strong: rgba(0, 0, 0, 0.14);
+  --hairline: rgba(0, 0, 0, 0.06);
+  --hairline-strong: rgba(0, 0, 0, 0.12);
   --row-hover: rgba(0, 0, 0, 0.025);
-  --chip-bg: rgba(0, 0, 0, 0.045);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 32px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.14);
-  --glass: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(0, 0, 0, 0.06);
+  --chip-bg: rgba(0, 0, 0, 0.04);
+  --chip-grad: linear-gradient(180deg, rgba(0,0,0,0.025), rgba(0,0,0,0.06));
+  --gloss-top: rgba(255, 255, 255, 0.9);
+  --gloss-edge: rgba(255, 255, 255, 0.6);
+  --shadow-sm: 0 1px 2px rgba(15, 20, 40, 0.06);
+  --shadow-md:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.04),
+    0 1px 3px rgba(15, 20, 40, 0.04),
+    0 8px 24px rgba(15, 20, 40, 0.06);
+  --shadow-lg:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 24px 60px rgba(15, 20, 40, 0.12),
+    0 8px 24px rgba(15, 20, 40, 0.06);
+  --glass: rgba(255, 255, 255, 0.65);
+  --glass-grad: linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(255,255,255,0.55) 100%);
+  --glass-border: rgba(0, 0, 0, 0.05);
 }
 
 [data-theme="dark"] {
-  --bg: #08080a;
-  --bg-elev: #111114;
-  --bg-tint: #16161a;
+  --bg: #16181c;
+  --bg-grad:
+    radial-gradient(ellipse 70% 50% at 80% 0%, rgba(48, 220, 110, 0.10) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 10% 100%, rgba(31, 217, 104, 0.06) 0%, transparent 60%),
+    linear-gradient(180deg, #1a1d22 0%, #14171b 100%);
+  --bg-elev: #1f2228;
+  --bg-elev-grad: linear-gradient(180deg, rgba(36,40,46,0.95) 0%, rgba(28,31,36,0.95) 100%);
+  --bg-tint: #23272d;
   --fg: #f5f5f7;
-  --fg-2: #d1d1d6;
-  --fg-3: #8e8e93;
+  --fg-2: #d8d8dc;
+  --fg-3: #98989d;
   --fg-4: #6b6b70;
-  --hairline: rgba(255, 255, 255, 0.08);
-  --hairline-strong: rgba(255, 255, 255, 0.16);
-  --row-hover: rgba(255, 255, 255, 0.035);
-  --chip-bg: rgba(255, 255, 255, 0.06);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 32px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.6);
-  --glass: rgba(20, 20, 22, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --hairline: rgba(255, 255, 255, 0.06);
+  --hairline-strong: rgba(255, 255, 255, 0.12);
+  --row-hover: rgba(90, 255, 140, 0.04);
+  --chip-bg: rgba(255, 255, 255, 0.05);
+  --chip-grad: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
+  --gloss-top: rgba(255, 255, 255, 0.08);
+  --gloss-edge: rgba(255, 255, 255, 0.05);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 0 0 0.5px rgba(255, 255, 255, 0.03),
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    0 16px 40px rgba(0, 0, 0, 0.6);
+  --shadow-lg:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 24px 70px rgba(0, 0, 0, 0.75),
+    0 8px 24px rgba(0, 0, 0, 0.55);
+  --glass: rgba(10, 11, 12, 0.6);
+  --glass-grad: linear-gradient(180deg, rgba(20,22,24,0.7) 0%, rgba(8,9,10,0.55) 100%);
+  --glass-border: rgba(255, 255, 255, 0.06);
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
+  background-image: var(--bg-grad);
+  background-attachment: fixed;
   color: var(--fg);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  font-family: 'Inter', 'Inter Tight', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   font-feature-settings: 'ss01', 'cv11';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -91,23 +126,37 @@ body {
 .app {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 28px 40px 80px;
+  padding: 16px 32px 80px;
 }
 
-/* Nav */
+/* Top nav — floating pill */
 .nav {
   position: sticky;
-  top: 0;
+  top: 12px;
   z-index: 40;
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  background: var(--glass);
-  border-bottom: 0.5px solid var(--hairline);
-  margin: -28px -40px 28px;
-  padding: 14px 40px;
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  background: var(--glass-grad), var(--glass);
+  border: 0.5px solid var(--glass-border);
+  border-radius: 18px;
+  margin: 0 0 28px;
+  padding: 10px 12px 10px 18px;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 18px;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.02),
+    0 12px 40px rgba(15, 20, 40, 0.08);
+}
+.nav::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 40%);
+  pointer-events: none;
+  opacity: 0.6;
 }
 .logo {
   display: flex;
@@ -119,23 +168,30 @@ body {
   letter-spacing: -0.02em;
   color: var(--fg);
   cursor: pointer;
+  position: relative;
 }
 .logo-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, var(--accent) 0%, #7A2CC9 100%);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 50%),
+    linear-gradient(135deg, #7BFFA8 0%, var(--accent) 35%, var(--accent-2) 100%);
   position: relative;
-  box-shadow: 0 2px 6px rgba(191, 90, 242, 0.35);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.45) inset,
+    0 0 0 0.5px rgba(255,255,255,0.2) inset,
+    0 4px 14px rgba(48, 220, 110, 0.55),
+    0 1px 3px rgba(31, 217, 104, 0.35);
 }
 .logo-mark::after {
   content: '';
   position: absolute;
-  inset: 5px;
-  border-left: 1.5px solid white;
-  border-bottom: 1.5px solid white;
+  inset: 7px;
+  border-left: 1.5px solid #042a14;
+  border-bottom: 1.5px solid #042a14;
   border-radius: 0 0 0 2px;
-  opacity: 0.95;
+  opacity: 0.9;
 }
 .nav-links {
   display: flex;
@@ -150,52 +206,62 @@ body {
   cursor: pointer;
   font-weight: 450;
   transition: all 0.15s ease;
+  position: relative;
 }
-.nav-link:hover { color: var(--fg); background: var(--chip-bg); }
-.nav-link.active { color: var(--fg); background: var(--chip-bg); }
+.nav-link:hover { color: var(--fg); background: var(--chip-grad), var(--chip-bg); }
+.nav-link.active {
+  color: var(--fg);
+  background: var(--chip-grad), var(--chip-bg);
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px var(--hairline);
+}
 .nav-spacer { flex: 1; }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 11px 5px 9px;
+  padding: 5px 12px 5px 10px;
   font-size: 11.5px;
   color: var(--fg-2);
-  background: var(--chip-bg);
+  background: var(--chip-grad), var(--chip-bg);
   border-radius: 999px;
   font-weight: 450;
+  box-shadow: 0 1px 0 var(--gloss-top) inset, 0 0 0 0.5px var(--hairline);
 }
 .status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--up);
-  box-shadow: 0 0 0 3px var(--up-soft);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 8px var(--accent);
   animation: pulse 2s ease-in-out infinite;
 }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 3px var(--up-soft); }
-  50% { box-shadow: 0 0 0 5px var(--up-soft); }
+  0%, 100% { box-shadow: 0 0 0 3px var(--accent-soft), 0 0 8px var(--accent); }
+  50% { box-shadow: 0 0 0 5px var(--accent-soft), 0 0 12px var(--accent); }
 }
 
 .icon-btn {
   appearance: none;
-  background: transparent;
+  background: var(--chip-grad), var(--chip-bg);
   border: 0.5px solid var(--hairline);
   color: var(--fg-2);
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 9px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   transition: all 0.15s;
+  box-shadow: 0 1px 0 var(--gloss-top) inset;
+  position: relative;
 }
-.icon-btn:hover { background: var(--chip-bg); color: var(--fg); }
+.icon-btn:hover { color: var(--fg); transform: translateY(-0.5px); box-shadow: 0 1px 0 var(--gloss-top) inset, var(--shadow-sm); }
 
-/* Indices */
+/* Indices cards */
 .indices {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -203,27 +269,47 @@ body {
   margin-bottom: 28px;
 }
 .idx {
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   border: 0.5px solid var(--hairline);
-  border-radius: 14px;
-  padding: 16px 18px 14px;
+  border-radius: 16px;
+  padding: 18px 20px 16px;
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s;
+  transition: transform 0.25s cubic-bezier(.2,.8,.2,1), box-shadow 0.25s ease, border-color 0.2s;
   position: relative;
   overflow: hidden;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.02),
+    0 1px 2px rgba(15, 20, 40, 0.04),
+    0 8px 24px rgba(15, 20, 40, 0.05);
+}
+.idx::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 35%);
+  pointer-events: none;
+  opacity: 0.5;
 }
 .idx:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.03),
+    0 4px 8px rgba(15, 20, 40, 0.06),
+    0 16px 40px rgba(15, 20, 40, 0.10);
   border-color: var(--hairline-strong);
 }
 .idx.open::before {
   content: '';
   position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  background: var(--up);
-  opacity: 0.9;
+  top: 0; left: 16px; right: 16px;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.95;
+  z-index: 1;
+  box-shadow: 0 0 8px var(--accent);
 }
 .idx-head {
   display: flex;
@@ -266,7 +352,7 @@ body {
   align-items: center;
   gap: 3px;
 }
-.idx-chg.up { color: var(--up); }
+.idx-chg.up { color: var(--accent); }
 .idx-chg.down { color: var(--down); }
 .idx-state {
   font-size: 10px;
@@ -275,7 +361,7 @@ body {
   color: var(--fg-4);
   font-weight: 500;
 }
-.idx-state.active { color: var(--up); }
+.idx-state.active { color: var(--accent); }
 
 /* Section header */
 .section-head {
@@ -306,19 +392,24 @@ body {
 }
 .search input {
   width: 100%;
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   border: 0.5px solid var(--hairline);
-  border-radius: 11px;
-  padding: 12px 16px 12px 40px;
+  border-radius: 12px;
+  padding: 13px 16px 13px 42px;
   font-size: 14px;
   color: var(--fg);
   font-family: inherit;
-  transition: all 0.15s;
+  transition: all 0.18s;
   outline: none;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 1px 2px rgba(15, 20, 40, 0.04);
 }
 .search input:focus {
   border-color: var(--accent-ring);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 4px var(--accent-soft);
 }
 .search input::placeholder { color: var(--fg-4); }
 .search-icon {
@@ -330,7 +421,29 @@ body {
   pointer-events: none;
 }
 
-/* Table */
+/* Table wrapped in glossy card */
+.tbl-wrap {
+  background: var(--bg-elev-grad), var(--bg-elev);
+  border: 0.5px solid var(--hairline);
+  border-radius: 16px;
+  padding: 4px 14px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.02),
+    0 8px 30px rgba(15, 20, 40, 0.06);
+}
+.tbl-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 30%);
+  pointer-events: none;
+  opacity: 0.4;
+}
+.tbl-wrap > * { position: relative; }
 .tbl {
   width: 100%;
   border-collapse: collapse;
@@ -355,7 +468,7 @@ body {
 }
 .tbl tbody tr:hover { background: var(--row-hover); }
 .tbl tbody td {
-  padding: var(--row-pad, 16px) 12px;
+  padding: var(--row-pad, 14px) 12px;
   font-size: 13.5px;
   vertical-align: middle;
   transition: padding 0.2s;
@@ -373,10 +486,10 @@ body {
   gap: 10px;
 }
 .sym-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--chip-bg);
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--chip-grad), var(--chip-bg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -384,6 +497,9 @@ body {
   font-weight: 600;
   color: var(--fg-2);
   letter-spacing: 0;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px var(--hairline);
 }
 .company {
   color: var(--fg-3);
@@ -401,7 +517,7 @@ body {
   align-items: center;
   gap: 3px;
 }
-.chg.up { color: var(--up); }
+.chg.up { color: var(--accent); }
 .chg.down { color: var(--down); }
 
 .spark-cell {
@@ -410,6 +526,7 @@ body {
   position: relative;
 }
 
+/* Score */
 .score {
   display: inline-flex;
   align-items: center;
@@ -434,8 +551,12 @@ body {
   border-radius: 2px;
   transition: width 0.4s ease;
 }
-.score.strong .score-fill { background: var(--accent); }
+.score.strong .score-fill {
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 8px rgba(90, 255, 140, 0.5);
+}
 
+/* Signal badge + hover actions */
 .signal-cell {
   text-align: right;
   position: relative;
@@ -447,23 +568,24 @@ body {
   gap: 6px;
   font-size: 11.5px;
   font-weight: 500;
-  padding: 4px 10px 4px 8px;
+  padding: 4px 11px 4px 9px;
   border-radius: 999px;
-  background: var(--chip-bg);
+  background: var(--chip-grad), var(--chip-bg);
   color: var(--fg-3);
   letter-spacing: -0.005em;
+  box-shadow: 0 1px 0 var(--gloss-top) inset, 0 0 0 0.5px var(--hairline);
 }
 .badge::before {
   content: '';
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
-  opacity: 0.7;
+  box-shadow: 0 0 6px currentColor;
 }
-.badge.buy { color: var(--up); background: var(--up-soft); }
-.badge.sell { color: var(--down); background: var(--down-soft); }
-.badge.watch { color: var(--accent); background: var(--accent-soft); }
+.badge.buy { color: #7BFFA8; background: linear-gradient(180deg, rgba(90,255,140,0.22), rgba(48,220,110,0.10)); box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset, 0 0 0 0.5px rgba(90,255,140,0.30), 0 0 12px rgba(90,255,140,0.15); }
+.badge.sell { color: #FF7A86; background: linear-gradient(180deg, rgba(255,77,94,0.20), rgba(255,77,94,0.08)); box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset, 0 0 0 0.5px rgba(255,77,94,0.28); }
+.badge.watch { color: var(--fg-2); background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03)); box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset, 0 0 0 0.5px var(--hairline); }
 
 .row-actions {
   position: absolute;
@@ -481,46 +603,74 @@ body {
   transform: translateY(-50%) translateX(0);
   pointer-events: auto;
 }
-.tbl tbody tr:hover .signal-static {
-  opacity: 0;
-}
+.tbl tbody tr:hover .signal-static { opacity: 0; }
 .signal-static { transition: opacity 0.15s; }
 
 .btn {
   appearance: none;
   border: 0.5px solid var(--hairline);
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   color: var(--fg);
-  padding: 6px 12px;
-  border-radius: 8px;
+  padding: 7px 13px;
+  border-radius: 9px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  transition: all 0.12s;
+  transition: all 0.15s cubic-bezier(.2,.8,.2,1);
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 1px 2px rgba(15, 20, 40, 0.05);
 }
-.btn:hover { background: var(--chip-bg); border-color: var(--hairline-strong); }
+.btn:hover { transform: translateY(-0.5px); border-color: var(--hairline-strong); box-shadow: 0 1px 0 var(--gloss-top) inset, 0 4px 10px rgba(15, 20, 40, 0.08); }
+.btn:active { transform: translateY(0); }
 .btn.primary {
-  background: var(--fg);
-  color: var(--bg);
-  border-color: var(--fg);
+  background: linear-gradient(180deg, #2a2a2e, #0a0a0a);
+  color: #fff;
+  border-color: rgba(0,0,0,0.5);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.15) inset,
+    0 0 0 0.5px rgba(0,0,0,0.6),
+    0 4px 10px rgba(0,0,0,0.25);
 }
-.btn.primary:hover { opacity: 0.88; }
+[data-theme="dark"] .btn.primary {
+  background: linear-gradient(180deg, #f5f5f7, #d8d8dc);
+  color: #0a0a0a;
+  border-color: rgba(255,255,255,0.3);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.6) inset,
+    0 4px 10px rgba(0,0,0,0.4);
+}
+.btn.primary:hover { filter: brightness(1.08); }
 .btn.accent {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-  box-shadow: 0 2px 8px rgba(191, 90, 242, 0.25);
+  background: linear-gradient(180deg, #7BFFA8 0%, var(--accent) 50%, var(--accent-2) 100%);
+  color: #042a14;
+  border-color: rgba(31, 217, 104, 0.6);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.4) inset,
+    0 0 0 0.5px rgba(31, 217, 104, 0.3),
+    0 4px 14px rgba(48, 220, 110, 0.45),
+    0 1px 3px rgba(31, 217, 104, 0.35);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.2);
+  font-weight: 600;
 }
-.btn.accent:hover { filter: brightness(1.08); }
+.btn.accent:hover {
+  filter: brightness(1.08);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.5) inset,
+    0 0 0 0.5px rgba(31, 217, 104, 0.45),
+    0 6px 20px rgba(48, 220, 110, 0.6),
+    0 2px 4px rgba(31, 217, 104, 0.4);
+}
 .btn.ghost {
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
 }
-.btn.ghost:hover { background: var(--chip-bg); }
+.btn.ghost:hover { background: var(--chip-grad), var(--chip-bg); box-shadow: 0 1px 0 var(--gloss-top) inset; }
 
 /* Detail page */
 .back-btn {
@@ -573,34 +723,54 @@ body {
 }
 
 .chart-card {
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   border: 0.5px solid var(--hairline);
-  border-radius: 16px;
-  padding: 20px 24px 24px;
+  border-radius: 18px;
+  padding: 22px 26px 26px;
   margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.02),
+    0 8px 30px rgba(15, 20, 40, 0.06);
+}
+.chart-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 30%);
+  pointer-events: none;
+  opacity: 0.5;
 }
 .chart-tabs {
   display: flex;
   gap: 2px;
-  background: var(--chip-bg);
+  background: var(--chip-grad), var(--chip-bg);
   padding: 3px;
-  border-radius: 9px;
+  border-radius: 10px;
   width: fit-content;
   margin-bottom: 8px;
+  box-shadow: 0 1px 0 var(--gloss-top) inset, inset 0 0 0 0.5px var(--hairline);
 }
 .chart-tab {
-  padding: 5px 12px;
+  padding: 5px 13px;
   font-size: 11.5px;
   font-weight: 500;
   color: var(--fg-3);
   border-radius: 7px;
   cursor: pointer;
   font-variant-numeric: tabular-nums;
+  transition: all 0.15s;
 }
 .chart-tab.active {
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   color: var(--fg);
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px var(--hairline),
+    0 1px 3px rgba(15, 20, 40, 0.08);
 }
 
 .stats-grid {
@@ -610,10 +780,25 @@ body {
   margin-bottom: 20px;
 }
 .stat {
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   border: 0.5px solid var(--hairline);
-  border-radius: 12px;
-  padding: 14px 16px;
+  border-radius: 14px;
+  padding: 15px 17px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.02),
+    0 4px 14px rgba(15, 20, 40, 0.04);
+}
+.stat::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 50%);
+  pointer-events: none;
+  opacity: 0.45;
 }
 .stat-label {
   font-size: 10.5px;
@@ -622,6 +807,7 @@ body {
   color: var(--fg-4);
   font-weight: 500;
   margin-bottom: 4px;
+  position: relative;
 }
 .stat-val {
   font-family: 'Inter Tight', sans-serif;
@@ -629,6 +815,7 @@ body {
   font-weight: 500;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  position: relative;
 }
 
 /* Config page */
@@ -638,11 +825,27 @@ body {
   gap: 20px;
 }
 .config-card {
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   border: 0.5px solid var(--hairline);
-  border-radius: 16px;
-  padding: 24px;
+  border-radius: 18px;
+  padding: 26px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.02),
+    0 8px 30px rgba(15, 20, 40, 0.06);
 }
+.config-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 30%);
+  pointer-events: none;
+  opacity: 0.5;
+}
+.config-card > * { position: relative; }
 .config-card h3 {
   font-family: 'Inter Tight', sans-serif;
   font-size: 17px;
@@ -675,29 +878,33 @@ body {
 }
 
 .toggle {
-  width: 40px;
-  height: 24px;
+  width: 44px;
+  height: 26px;
   border-radius: 999px;
-  background: var(--hairline-strong);
+  background: linear-gradient(180deg, var(--hairline-strong), var(--hairline));
   position: relative;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.25s;
   flex-shrink: 0;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
 }
 .toggle::after {
   content: '';
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: white;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-  transition: transform 0.2s cubic-bezier(.4,0,.2,1);
+  background: linear-gradient(180deg, #ffffff, #f0f0f2);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.8) inset,
+    0 1px 2px rgba(0,0,0,0.15),
+    0 2px 6px rgba(0,0,0,0.18);
+  transition: transform 0.25s cubic-bezier(.4,0,.2,1);
 }
-.toggle.on { background: var(--up); }
-.toggle.on::after { transform: translateX(16px); }
+.toggle.on { background: linear-gradient(180deg, var(--accent), var(--accent-2)); box-shadow: inset 0 1px 2px rgba(0,0,0,0.2), 0 0 0 0.5px rgba(31,217,104,0.5), 0 0 12px rgba(90,255,140,0.4); }
+.toggle.on::after { transform: translateX(18px); }
 
 .slider-row {
   display: flex;
@@ -715,12 +922,15 @@ body {
 }
 .slider-row input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: var(--bg-elev);
+  background: linear-gradient(180deg, #ffffff, #f0f0f2);
   border: 0.5px solid var(--hairline-strong);
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.8) inset,
+    0 1px 2px rgba(0,0,0,0.15),
+    0 2px 6px rgba(0,0,0,0.18);
   cursor: pointer;
 }
 .slider-row .val {
@@ -734,38 +944,59 @@ body {
 
 .segmented {
   display: inline-flex;
-  background: var(--chip-bg);
+  background: var(--chip-grad), var(--chip-bg);
   padding: 3px;
-  border-radius: 9px;
+  border-radius: 10px;
   gap: 2px;
+  box-shadow: 0 1px 0 var(--gloss-top) inset, inset 0 0 0 0.5px var(--hairline);
 }
 .seg {
-  padding: 5px 12px;
+  padding: 6px 13px;
   font-size: 12px;
   font-weight: 450;
   color: var(--fg-3);
   border-radius: 7px;
   cursor: pointer;
   user-select: none;
+  transition: all 0.15s;
 }
 .seg.active {
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   color: var(--fg);
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px var(--hairline),
+    0 1px 3px rgba(15, 20, 40, 0.08);
 }
 
 /* CTA bar */
 .cta-bar {
-  background: var(--bg-elev);
+  background: var(--bg-elev-grad), var(--bg-elev);
   border: 0.5px solid var(--hairline);
-  border-radius: 16px;
-  padding: 20px 24px;
+  border-radius: 18px;
+  padding: 22px 26px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
   margin-top: 20px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 var(--gloss-top) inset,
+    0 0 0 0.5px rgba(0, 0, 0, 0.02),
+    0 8px 30px rgba(15, 20, 40, 0.06);
 }
+.cta-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 35%);
+  pointer-events: none;
+  opacity: 0.5;
+}
+.cta-bar > * { position: relative; }
 .cta-text {
   font-size: 14px;
   color: var(--fg);
@@ -799,10 +1030,7 @@ body {
   color: var(--fg-2);
   margin: 0 0 8px;
 }
-.empty-state p {
-  font-size: 14px;
-  margin: 0;
-}
+.empty-state p { font-size: 14px; margin: 0; }
 
 /* Loading shimmer */
 @keyframes shimmer {
@@ -823,8 +1051,7 @@ body {
   .config-grid { grid-template-columns: 1fr; }
   .detail-title { font-size: 32px; }
   .detail-price { font-size: 40px; }
-  .app { padding: 20px 20px 60px; }
-  .nav { margin: -20px -20px 20px; padding: 12px 20px; }
+  .app { padding: 12px 16px 60px; }
 }
 @media (max-width: 600px) {
   .indices { grid-template-columns: 1fr; }
@@ -842,6 +1069,12 @@ body {
 
 <script type="text/babel">
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+// ═══════════════════════════════════════════════════════════════
+// CONSTANTS — hex colors for SVG (CSS vars don't resolve in stopColor)
+// ═══════════════════════════════════════════════════════════════
+const COLOR_UP   = '#2FD66B';
+const COLOR_DOWN = '#FF4D5E';
 
 // ═══════════════════════════════════════════════════════════════
 // API LAYER
@@ -874,7 +1107,6 @@ function signalLabel(s) {
 // HOOKS
 // ═══════════════════════════════════════════════════════════════
 
-// Live price stream via SSE — returns {symbol: {price, volume, ts}} map
 function useLivePrices(symbols) {
   const [prices, setPrices] = useState({});
   useEffect(() => {
@@ -893,25 +1125,6 @@ function useLivePrices(symbols) {
     return () => es.close();
   }, [symbols.join(',')]); // eslint-disable-line
   return prices;
-}
-
-function useApi(fetcher, deps = []) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetcher()
-      .then(d => { if (!cancelled) setData(d); })
-      .catch(e => { if (!cancelled) setError(e.message || 'Erreur de chargement'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, deps); // eslint-disable-line
-
-  return { data, loading, error, refetch: () => {} };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -938,7 +1151,7 @@ function Icon({ name, size = 16, stroke = 1.5 }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SPARKLINE
+// SPARKLINE — hex colors passed directly (CSS vars fail in SVG stopColor)
 // ═══════════════════════════════════════════════════════════════
 
 function Sparkline({ data, color, width = 120, height = 32, fill = false, strokeWidth = 1.25 }) {
@@ -954,7 +1167,9 @@ function Sparkline({ data, color, width = 120, height = 32, fill = false, stroke
       return [x, y];
     });
     const path = pts.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(' ');
-    const area = `${path} L${width},${height} L0,${height} Z`;
+    // Fade area stops before the bottom edge to avoid dark wedge artifact
+    const fadeEnd = Math.min(height, Math.max(...pts.map(p => p[1])) + (height * 0.35));
+    const area = `${path} L${width},${fadeEnd} L0,${fadeEnd} Z`;
     return { path, area, lastY: pts[pts.length - 1][1] };
   }, [data, width, height]);
 
@@ -964,8 +1179,9 @@ function Sparkline({ data, color, width = 120, height = 32, fill = false, stroke
       {fill && (
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={color} stopOpacity="0.18"/>
-            <stop offset="1" stopColor={color} stopOpacity="0"/>
+            <stop offset="0"   stopColor={color} stopOpacity="0.28"/>
+            <stop offset="0.6" stopColor={color} stopOpacity="0.08"/>
+            <stop offset="1"   stopColor={color} stopOpacity="0"/>
           </linearGradient>
         </defs>
       )}
@@ -987,10 +1203,6 @@ function ThemeToggle({ theme, setTheme }) {
     </button>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════
-// STATUS PILL
-// ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
 // RISK PANEL (v2)
@@ -1019,8 +1231,7 @@ function RiskPanel() {
     setBusy(true);
     try {
       const active = risk.kill_switch_active;
-      const url = '/api/v2/risk/kill-switch';
-      await apiFetch(url, { method: active ? 'DELETE' : 'POST' });
+      await apiFetch('/api/v2/risk/kill-switch', { method: active ? 'DELETE' : 'POST' });
       await load();
     } catch (e) { console.error(e); }
     setBusy(false);
@@ -1029,9 +1240,9 @@ function RiskPanel() {
   if (!regime && !risk) return null;
 
   const regimeColor = !regime ? 'var(--fg-4)'
-    : regime.regime === 'bull_calm' ? 'var(--up)'
+    : regime.regime === 'bull_calm' ? COLOR_UP
     : regime.regime === 'bull_vol' ? '#FFB020'
-    : 'var(--down)';
+    : COLOR_DOWN;
 
   const regimeLabel = !regime ? '—'
     : regime.regime === 'bull_calm' ? 'Bullish calme'
@@ -1047,11 +1258,12 @@ function RiskPanel() {
       gridTemplateColumns: 'repeat(4, 1fr)',
       gap: 12,
       marginBottom: 20,
-      padding: '14px 16px',
-      background: 'var(--bg-elev)',
+      padding: '14px 18px',
+      background: 'var(--bg-elev-grad), var(--bg-elev)',
       border: '0.5px solid var(--hairline)',
-      borderRadius: 12,
-      borderLeft: `3px solid ${halted ? 'var(--down)' : regimeColor}`,
+      borderRadius: 14,
+      borderLeft: `3px solid ${halted ? COLOR_DOWN : regimeColor}`,
+      boxShadow: '0 1px 0 var(--gloss-top) inset, 0 4px 14px rgba(15,20,40,0.05)',
     }}>
       <div>
         <div className="eyebrow">Régime de marché</div>
@@ -1064,41 +1276,31 @@ function RiskPanel() {
           </div>
         )}
       </div>
-
       <div>
         <div className="eyebrow">Exposition autorisée</div>
         <div style={{ fontSize: 14, fontWeight: 500, marginTop: 4 }}>
           {regime ? `${(regime.exposure_multiplier * 100).toFixed(0)}%` : '—'}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>
-          du sizing nominal
-        </div>
+        <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>du sizing nominal</div>
       </div>
-
       <div>
         <div className="eyebrow">Circuit Breaker</div>
-        <div style={{
-          fontSize: 14,
-          fontWeight: 500,
-          color: halted ? 'var(--down)' : 'var(--up)',
-          marginTop: 4,
-        }}>
+        <div style={{ fontSize: 14, fontWeight: 500, color: halted ? COLOR_DOWN : COLOR_UP, marginTop: 4 }}>
           {halted ? '🛑 HALTED' : '✓ Actif'}
         </div>
         <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 2 }}>
           {breaker?.tripped_level || 'aucun déclenchement'}
         </div>
       </div>
-
       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <button
           className="btn"
           disabled={busy}
           onClick={toggleKillSwitch}
           style={{
-            background: risk?.kill_switch_active ? 'var(--down)' : 'transparent',
-            color: risk?.kill_switch_active ? 'white' : 'var(--down)',
-            border: '1px solid var(--down)',
+            background: risk?.kill_switch_active ? COLOR_DOWN : 'transparent',
+            color: risk?.kill_switch_active ? 'white' : COLOR_DOWN,
+            border: `1px solid ${COLOR_DOWN}`,
             fontWeight: 500,
           }}
         >
@@ -1113,8 +1315,8 @@ function StatusPill({ open }) {
   return (
     <span className="status-pill">
       <span className="status-dot" style={{
-        background: open ? 'var(--up)' : 'var(--fg-4)',
-        boxShadow: open ? '0 0 0 3px var(--up-soft)' : 'none',
+        background: open ? COLOR_UP : 'var(--fg-4)',
+        boxShadow: open ? `0 0 0 3px var(--up-soft), 0 0 8px ${COLOR_UP}` : 'none',
         animation: open ? 'pulse 2s ease-in-out infinite' : 'none'
       }} />
       {open ? 'Marchés ouverts' : 'Hors session'}
@@ -1134,7 +1336,6 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Live price stream
   const symbols = useMemo(() => (stocks || []).map(s => s.sym), [stocks]);
   const livePrices = useLivePrices(symbols);
 
@@ -1156,14 +1357,7 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
-
-  // Auto-refresh every 60s
-  useEffect(() => {
-    const t = setInterval(loadData, 60000);
-    return () => clearInterval(t);
-  }, [loadData]);
-
-  // Refresh on bot toggle
+  useEffect(() => { const t = setInterval(loadData, 60000); return () => clearInterval(t); }, [loadData]);
   useEffect(() => {
     if (!botActive) return;
     const t = setTimeout(loadData, 2000);
@@ -1192,7 +1386,6 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
   const indices = markets?.exchanges || [];
   const anyOpen = indices.some(i => i.open);
 
-  // Bot toggle
   const handleBotToggle = async () => {
     try {
       if (botActive) {
@@ -1202,9 +1395,7 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
         await apiFetch('/api/bot/start', { method: 'POST' });
         setBotActive(true);
       }
-    } catch (e) {
-      alert('Erreur: ' + e.message);
-    }
+    } catch (e) { alert('Erreur: ' + e.message); }
   };
 
   if (loading && !stocks) {
@@ -1212,7 +1403,7 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
       <>
         <div className="indices">
           {[1,2,3,4].map(i => (
-            <div key={i} className="idx" style={{ border: '0.5px solid var(--hairline)', padding: '16px 18px 14px' }}>
+            <div key={i} className="idx">
               <div className="shimmer" style={{ width: '60%', height: 12, marginBottom: 12 }} />
               <div className="shimmer" style={{ width: '40%', height: 24, marginBottom: 10 }} />
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1223,7 +1414,7 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
           ))}
         </div>
         <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--fg-3)' }}>
-          Chargement des données...
+          Chargement des données…
         </div>
       </>
     );
@@ -1234,9 +1425,7 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
       <div className="empty-state">
         <h3>Erreur de connexion</h3>
         <p>{error}</p>
-        <button className="btn accent" onClick={loadData} style={{ marginTop: 16 }}>
-          Réessayer
-        </button>
+        <button className="btn accent" onClick={loadData} style={{ marginTop: 16 }}>Réessayer</button>
       </div>
     );
   }
@@ -1319,88 +1508,89 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
           <p>{query ? 'Essaie de modifier ta recherche' : 'Les données arrivent dans un instant'}</p>
         </div>
       ) : (
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th style={{ width: '18%' }} onClick={() => toggleSort('sym')}>Symbole{sortArrow('sym')}</th>
-            <th style={{ width: '24%' }} onClick={() => toggleSort('name')}>Société{sortArrow('name')}</th>
-            <th style={{ width: '12%' }} onClick={() => toggleSort('price')}>Prix{sortArrow('price')}</th>
-            <th style={{ width: '12%' }} onClick={() => toggleSort('chg')}>Variation{sortArrow('chg')}</th>
-            <th style={{ width: '14%' }}>Tendance 24h</th>
-            <th style={{ width: '10%' }} onClick={() => toggleSort('score')}>Score{sortArrow('score')}</th>
-            <th style={{ width: '10%', textAlign: 'right' }}>Signal</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map(s => {
-            const live = livePrices[s.sym];
-            const livePrice = live ? live.price : s.price;
-            const isUp = s.chg >= 0;
-            const liveIsUp = live ? livePrice >= s.price : isUp;
-            const sparkData = s.sparkline || [];
-            // Trend color based on sparkline shape (first vs last), not just today's chg
-            const sparkTrend = sparkData.length >= 2
-              ? sparkData[sparkData.length - 1] >= sparkData[0]
-              : isUp;
-            const color = sparkTrend ? 'var(--up)' : 'var(--down)';
-            const currency = s.currency || 'USD';
-            const prefix = currency === 'EUR' ? '' : '$';
-            const suffix = currency === 'EUR' ? ' €' : '';
-            const chgPrefix = isUp ? '+' : '';
-            return (
-              <tr key={s.sym} onClick={() => onOpenStock(s)}>
-                <td>
-                  <div className="sym">
-                    <span className="sym-mark">{s.sym.slice(0, 2)}</span>
-                    {s.sym}
-                  </div>
-                </td>
-                <td className="company">{s.name}{s.sym !== s.name ? ` (${s.sym})` : ''}</td>
-                <td className="price tnum" style={{ color: live ? (liveIsUp ? 'var(--up)' : 'var(--down)') : 'inherit', transition: 'color 0.4s' }}>
-                  {prefix}{fmt(livePrice)}{suffix}
-                </td>
-                <td>
-                  <span className={`chg ${isUp ? 'up' : 'down'}`}>
-                    <Icon name={isUp ? 'up' : 'down'} size={10} />
-                    {chgPrefix}{fmt(s.chg)}%
-                  </span>
-                </td>
-                <td>
-                  <div className="spark-cell">
-                    {sparkData.length > 0 ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Sparkline data={sparkData} color={color} width={80} height={30} fill />
-                        <span style={{ fontSize: 10, fontWeight: 500, color, whiteSpace: 'nowrap' }}>
-                          {sparkTrend ? '↑' : '↓'} {chgPrefix}{fmt(s.chg)}%
-                        </span>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--fg-4)', fontSize: 11 }}>—</span>
-                    )}
-                  </div>
-                </td>
-                <td>
-                  <span className={`score ${s.score >= 0.6 ? 'strong' : ''}`}>
-                    <span className="score-num tnum">{s.score.toFixed(2)}</span>
-                    <span className="score-bar"><span className="score-fill" style={{ width: `${Math.min(s.score * 100, 100)}%` }} /></span>
-                  </span>
-                </td>
-                <td className="signal-cell">
-                  <span className={`badge ${s.signal} signal-static`}>{signalLabel(s.signal)}</span>
-                  <span className="row-actions">
-                    <button className="btn" onClick={e => { e.stopPropagation(); onOpenStock(s); }}>
-                      Détail <Icon name="arrow-up-right" size={11} />
-                    </button>
-                    <button className={`btn ${s.signal === 'buy' ? 'accent' : ''}`} onClick={e => e.stopPropagation()}>
-                      {s.signal === 'buy' ? 'Trader' : s.signal === 'sell' ? 'Vendre' : 'Surveiller'}
-                    </button>
-                  </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="tbl-wrap">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ width: '18%' }} onClick={() => toggleSort('sym')}>Symbole{sortArrow('sym')}</th>
+              <th style={{ width: '24%' }} onClick={() => toggleSort('name')}>Société{sortArrow('name')}</th>
+              <th style={{ width: '12%' }} onClick={() => toggleSort('price')}>Prix{sortArrow('price')}</th>
+              <th style={{ width: '12%' }} onClick={() => toggleSort('chg')}>Variation{sortArrow('chg')}</th>
+              <th style={{ width: '14%' }}>Tendance 24h</th>
+              <th style={{ width: '10%' }} onClick={() => toggleSort('score')}>Score{sortArrow('score')}</th>
+              <th style={{ width: '10%', textAlign: 'right' }}>Signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(s => {
+              const live = livePrices[s.sym];
+              const livePrice = live ? live.price : s.price;
+              const isUp = s.chg >= 0;
+              const liveIsUp = live ? livePrice >= s.price : isUp;
+              const sparkData = s.sparkline || [];
+              const sparkTrend = sparkData.length >= 2
+                ? sparkData[sparkData.length - 1] >= sparkData[0]
+                : isUp;
+              const color = sparkTrend ? COLOR_UP : COLOR_DOWN;
+              const currency = s.currency || 'USD';
+              const prefix = currency === 'EUR' ? '' : '$';
+              const suffix = currency === 'EUR' ? ' €' : '';
+              const chgPrefix = isUp ? '+' : '';
+              return (
+                <tr key={s.sym} onClick={() => onOpenStock(s)}>
+                  <td>
+                    <div className="sym">
+                      <span className="sym-mark">{s.sym.slice(0, 2)}</span>
+                      {s.sym}
+                    </div>
+                  </td>
+                  <td className="company">{s.name}{s.sym !== s.name ? ` (${s.sym})` : ''}</td>
+                  <td className="price tnum" style={{ color: live ? (liveIsUp ? COLOR_UP : COLOR_DOWN) : 'inherit', transition: 'color 0.4s' }}>
+                    {prefix}{fmt(livePrice)}{suffix}
+                  </td>
+                  <td>
+                    <span className={`chg ${isUp ? 'up' : 'down'}`}>
+                      <Icon name={isUp ? 'up' : 'down'} size={10} />
+                      {chgPrefix}{fmt(s.chg)}%
+                    </span>
+                  </td>
+                  <td>
+                    <div className="spark-cell">
+                      {sparkData.length > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Sparkline data={sparkData} color={color} width={80} height={30} fill />
+                          <span style={{ fontSize: 10, fontWeight: 500, color, whiteSpace: 'nowrap' }}>
+                            {sparkTrend ? '↑' : '↓'} {chgPrefix}{fmt(s.chg)}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--fg-4)', fontSize: 11 }}>—</span>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`score ${s.score >= 0.6 ? 'strong' : ''}`}>
+                      <span className="score-num tnum">{s.score.toFixed(2)}</span>
+                      <span className="score-bar"><span className="score-fill" style={{ width: `${Math.min(s.score * 100, 100)}%` }} /></span>
+                    </span>
+                  </td>
+                  <td className="signal-cell">
+                    <span className={`badge ${s.signal} signal-static`}>{signalLabel(s.signal)}</span>
+                    <span className="row-actions">
+                      <button className="btn" onClick={e => { e.stopPropagation(); onOpenStock(s); }}>
+                        Détail <Icon name="arrow-up-right" size={11} />
+                      </button>
+                      <button className={`btn ${s.signal === 'buy' ? 'accent' : ''}`} onClick={e => e.stopPropagation()}>
+                        {s.signal === 'buy' ? 'Trader' : s.signal === 'sell' ? 'Vendre' : 'Surveiller'}
+                      </button>
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       )}
     </>
   );
@@ -1453,10 +1643,10 @@ function DetailScreen({ stock, onBack }) {
         <div style={{ padding: '40px 0' }}>
           <div className="shimmer" style={{ width: '40%', height: 32, marginBottom: 12 }} />
           <div className="shimmer" style={{ width: '60%', height: 48, marginBottom: 20 }} />
-          <div className="shimmer" style={{ width: '100%', height: 320, borderRadius: 16, marginBottom: 20 }} />
+          <div className="shimmer" style={{ width: '100%', height: 320, borderRadius: 18, marginBottom: 20 }} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
             {[1,2,3,4,5,6,7,8].map(i => (
-              <div key={i} className="shimmer" style={{ height: 72, borderRadius: 12 }} />
+              <div key={i} className="shimmer" style={{ height: 72, borderRadius: 14 }} />
             ))}
           </div>
         </div>
@@ -1480,7 +1670,7 @@ function DetailScreen({ stock, onBack }) {
 
   const d = detail || stock;
   const isUp = d.chg >= 0;
-  const color = isUp ? 'var(--up)' : 'var(--down)';
+  const color = isUp ? COLOR_UP : COLOR_DOWN;
   const currency = d.currency || 'USD';
   const prefix = currency === 'EUR' ? '' : '$';
   const suffix = currency === 'EUR' ? ' €' : '';
@@ -1524,7 +1714,7 @@ function DetailScreen({ stock, onBack }) {
       </div>
 
       <div className="chart-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, position: 'relative' }}>
           <div className="chart-tabs">
             {ranges.map(r => (
               <div key={r} className={`chart-tab ${range === r ? 'active' : ''}`} onClick={() => setRange(r)}>
@@ -1534,7 +1724,7 @@ function DetailScreen({ stock, onBack }) {
           </div>
           <span className={`badge ${d.signal}`}>Signal IA : {signalLabel(d.signal)}</span>
         </div>
-        <div style={{ width: '100%', height: 280 }}>
+        <div style={{ width: '100%', height: 280, position: 'relative' }}>
           {chartData && chartData.length > 0 ? (
             <Sparkline data={chartData} color={color} width={1140} height={280} fill strokeWidth={1.75} />
           ) : (
@@ -1609,21 +1799,11 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
     try {
       await apiFetch('/api/config', {
         method: 'POST',
-        body: JSON.stringify({
-          capital,
-          strategy,
-          max_positions: maxPos,
-          min_score: minScore,
-          auto_buy: autoBuy,
-          auto_sell: autoSell,
-          notifications,
-        }),
+        body: JSON.stringify({ capital, strategy, max_positions: maxPos, min_score: minScore, auto_buy: autoBuy, auto_sell: autoSell, notifications }),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      alert('Erreur: ' + e.message);
-    }
+    } catch (e) { alert('Erreur: ' + e.message); }
   };
 
   const handleBotToggle = async () => {
@@ -1635,9 +1815,7 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         await apiFetch('/api/bot/start', { method: 'POST' });
         setBotActive(true);
       }
-    } catch (e) {
-      alert('Erreur: ' + e.message);
-    }
+    } catch (e) { alert('Erreur: ' + e.message); }
   };
 
   if (loading) {
@@ -1650,7 +1828,7 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
           <div className="shimmer" style={{ width: '30%', height: 32, marginBottom: 20 }} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             {[1,2,3,4].map(i => (
-              <div key={i} className="shimmer" style={{ height: 200, borderRadius: 16 }} />
+              <div key={i} className="shimmer" style={{ height: 200, borderRadius: 18 }} />
             ))}
           </div>
         </div>
@@ -1700,7 +1878,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         <div className="config-card">
           <h3>Capital & risque</h3>
           <div className="sub">Définit la taille des positions prises par le bot.</div>
-
           <div className="field">
             <div>
               <div className="field-label">Capital alloué</div>
@@ -1711,7 +1888,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
               <span className="val tnum">${fmt(capital, 0)}</span>
             </div>
           </div>
-
           <div className="field">
             <div>
               <div className="field-label">Risque par trade</div>
@@ -1722,7 +1898,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
               <span className="val tnum">{risk}%</span>
             </div>
           </div>
-
           <div className="field">
             <div>
               <div className="field-label">Positions simultanées</div>
@@ -1738,7 +1913,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         <div className="config-card">
           <h3>Stratégie</h3>
           <div className="sub">Comportement général du moteur d'analyse.</div>
-
           <div className="field">
             <div>
               <div className="field-label">Profil</div>
@@ -1750,7 +1924,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
               ))}
             </div>
           </div>
-
           <div className="field">
             <div>
               <div className="field-label">Score minimum pour trader</div>
@@ -1766,7 +1939,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         <div className="config-card">
           <h3>Automatisation</h3>
           <div className="sub">Actions que le bot peut exécuter seul.</div>
-
           <div className="field">
             <div>
               <div className="field-label">Achats automatiques</div>
@@ -1774,7 +1946,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
             </div>
             <div className={`toggle ${autoBuy ? 'on' : ''}`} onClick={() => setAutoBuy(!autoBuy)} />
           </div>
-
           <div className="field">
             <div>
               <div className="field-label">Ventes automatiques</div>
@@ -1782,7 +1953,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
             </div>
             <div className={`toggle ${autoSell ? 'on' : ''}`} onClick={() => setAutoSell(!autoSell)} />
           </div>
-
           <div className="field">
             <div>
               <div className="field-label">Notifications push</div>
@@ -1795,7 +1965,6 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         <div className="config-card">
           <h3>Résumé</h3>
           <div className="sub">Aperçu de la configuration actuelle.</div>
-
           <div className="field">
             <div className="field-label">Capital engagé</div>
             <div className="tnum" style={{ color: 'var(--fg)', fontWeight: 500 }}>${fmt(capital, 0)}</div>
@@ -1839,7 +2008,6 @@ function App() {
     document.documentElement.setAttribute('data-density', 'compact');
   }, []);
 
-  // Check bot status on mount & poll
   useEffect(() => {
     const check = () => {
       apiFetch('/api/bot/status')
@@ -1869,7 +2037,7 @@ function App() {
         </div>
         <div className="nav-spacer" />
         {botActive && (
-          <span className="status-pill" style={{ color: 'var(--up)' }}>
+          <span className="status-pill" style={{ color: COLOR_UP }}>
             <span className="status-dot" /> Bot actif
           </span>
         )}
