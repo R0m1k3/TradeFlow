@@ -1779,6 +1779,17 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // AI state
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiModel, setAiModel] = useState('perplexity/sonar');
+  const [aiKey, setAiKey] = useState('');
+  const [aiKeyHint, setAiKeyHint] = useState('');
+  const [aiWeight, setAiWeight] = useState(0.3);
+  const [aiModels, setAiModels] = useState([]);
+  const [aiModelsLoading, setAiModelsLoading] = useState(false);
+  const [aiTestState, setAiTestState] = useState(null); // null | 'loading' | 'ok' | 'error'
+  const [aiTestMsg, setAiTestMsg] = useState('');
+
   useEffect(() => {
     apiFetch('/api/config')
       .then(cfg => {
@@ -1790,17 +1801,56 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         setAutoBuy(cfg.auto_buy !== false);
         setAutoSell(cfg.auto_sell !== false);
         setNotifications(cfg.notifications !== false);
+        setAiEnabled(cfg.ai_enabled || false);
+        setAiModel(cfg.ai_model || 'perplexity/sonar');
+        setAiWeight(cfg.ai_score_weight ?? 0.3);
+        setAiKeyHint(cfg.ai_key_hint || '');
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
+
+    // Fetch model list independently (may take a moment)
+    setAiModelsLoading(true);
+    apiFetch('/api/ai/models')
+      .then(data => setAiModels(data.models || []))
+      .catch(() => setAiModels([]))
+      .finally(() => setAiModelsLoading(false));
   }, []);
+
+  const handleTestConnection = async () => {
+    setAiTestState('loading');
+    setAiTestMsg('');
+    try {
+      const res = await apiFetch('/api/ai/test', {
+        method: 'POST',
+        body: JSON.stringify({ api_key: aiKey, model: aiModel }),
+      });
+      if (res.success) {
+        setAiTestState('ok');
+        setAiTestMsg(`Connexion réussie — ${res.model}`);
+      } else {
+        setAiTestState('error');
+        setAiTestMsg(res.error || 'Échec de connexion');
+      }
+    } catch (e) {
+      setAiTestState('error');
+      setAiTestMsg(e.message);
+    }
+    setTimeout(() => setAiTestState(null), 5000);
+  };
 
   const handleSave = async () => {
     try {
       await apiFetch('/api/config', {
         method: 'POST',
-        body: JSON.stringify({ capital, strategy, max_positions: maxPos, min_score: minScore, auto_buy: autoBuy, auto_sell: autoSell, notifications }),
+        body: JSON.stringify({
+          capital, strategy, max_positions: maxPos, min_score: minScore,
+          auto_buy: autoBuy, auto_sell: autoSell, notifications,
+          ai_enabled: aiEnabled, ai_model: aiModel, ai_score_weight: aiWeight,
+          ai_key: aiKey || undefined,
+        }),
       });
+      if (aiKey) { setAiKeyHint(aiKey.substring(0, 8) + '••••'); setAiKey(''); }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) { alert('Erreur: ' + e.message); }
@@ -1963,6 +2013,80 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         </div>
 
         <div className="config-card">
+          <h3>Analyse IA</h3>
+          <div className="sub">Scoring automatique via OpenRouter — enrichit les signaux du bot.</div>
+
+          <div className="field">
+            <div>
+              <div className="field-label">Activer l'analyse IA</div>
+              <div className="field-hint">Score 0–1 calculé toutes les 30 min par ticker</div>
+            </div>
+            <div className={`toggle ${aiEnabled ? 'on' : ''}`} onClick={() => setAiEnabled(!aiEnabled)} />
+          </div>
+
+          <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+            <div className="field-label">Clé API OpenRouter</div>
+            {aiKeyHint && <div className="field-hint" style={{ marginBottom: 4 }}>Clé actuelle : {aiKeyHint}</div>}
+            <input
+              type="password"
+              placeholder="sk-or-v1-..."
+              value={aiKey}
+              onChange={e => setAiKey(e.target.value)}
+              style={{
+                width: '100%', background: 'var(--bg-tint)', border: '1px solid var(--hairline-strong)',
+                borderRadius: 8, padding: '8px 12px', color: 'var(--fg)', fontSize: 13,
+                fontFamily: 'monospace', outline: 'none',
+              }}
+            />
+          </div>
+
+          <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+            <div className="field-label">Modèle IA</div>
+            {aiModelsLoading
+              ? <div className="field-hint">Chargement des modèles...</div>
+              : <select
+                  value={aiModel}
+                  onChange={e => setAiModel(e.target.value)}
+                  style={{
+                    width: '100%', background: 'var(--bg-tint)', border: '1px solid var(--hairline-strong)',
+                    borderRadius: 8, padding: '8px 12px', color: 'var(--fg)', fontSize: 13, outline: 'none',
+                  }}
+                >
+                  {aiModels.length === 0
+                    ? <option value={aiModel}>{aiModel}</option>
+                    : aiModels.map(m => <option key={m} value={m}>{m}</option>)
+                  }
+                </select>
+            }
+            <div className="field-hint">{aiModels.length > 0 ? `${aiModels.length} modèles disponibles` : 'Entrez votre clé API pour charger la liste complète'}</div>
+          </div>
+
+          <div className="field">
+            <div>
+              <div className="field-label">Poids du score IA</div>
+              <div className="field-hint">Influence sur la décision finale</div>
+            </div>
+            <div className="slider-row" style={{ width: 200 }}>
+              <input type="range" min="0" max="1" step="0.05" value={aiWeight} onChange={e => setAiWeight(+e.target.value)} />
+              <span className="val tnum">{Math.round(aiWeight * 100)}%</span>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            <button
+              className="btn"
+              onClick={handleTestConnection}
+              disabled={aiTestState === 'loading'}
+              style={{ fontSize: 13 }}
+            >
+              {aiTestState === 'loading' ? 'Test en cours...' : '🔌 Tester la connexion'}
+            </button>
+            {aiTestState === 'ok' && <span style={{ marginLeft: 10, color: 'var(--up)', fontSize: 13 }}>✓ {aiTestMsg}</span>}
+            {aiTestState === 'error' && <span style={{ marginLeft: 10, color: 'var(--down)', fontSize: 13 }}>✗ {aiTestMsg}</span>}
+          </div>
+        </div>
+
+        <div className="config-card">
           <h3>Résumé</h3>
           <div className="sub">Aperçu de la configuration actuelle.</div>
           <div className="field">
@@ -1981,6 +2105,18 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
             <div className="field-label">Seuil d'entrée</div>
             <div className="tnum" style={{ color: 'var(--fg)', fontWeight: 500 }}>Score ≥ {minScore}</div>
           </div>
+          <div className="field">
+            <div className="field-label">Analyse IA</div>
+            <div style={{ color: aiEnabled ? 'var(--up)' : 'var(--fg-3)', fontWeight: 500 }}>
+              {aiEnabled ? `Actif — poids ${Math.round(aiWeight * 100)}%` : 'Désactivée'}
+            </div>
+          </div>
+          {aiEnabled && (
+            <div className="field">
+              <div className="field-label">Modèle</div>
+              <div style={{ color: 'var(--fg)', fontWeight: 500, fontSize: 12, wordBreak: 'break-all' }}>{aiModel}</div>
+            </div>
+          )}
         </div>
       </div>
     </>

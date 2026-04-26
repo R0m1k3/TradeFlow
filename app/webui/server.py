@@ -78,6 +78,7 @@ HERE = Path(__file__).parent
 HTML_FILE = HERE / "TradeFlow.html"
 BOT_PID_FILE = _PROJECT_ROOT / "data" / "bot.pid"
 CONFIG_FILE = _PROJECT_ROOT / "config.yaml"
+ENV_FILE = _PROJECT_ROOT / ".env"
 DATA_DIR = _PROJECT_ROOT / "data"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -85,6 +86,23 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 init_database()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────────
+
+
+def _read_env_key(name: str) -> str:
+    if not ENV_FILE.exists():
+        return ""
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{name}="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def _write_env_key(name: str, value: str) -> None:
+    lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
+    lines = [l for l in lines if not l.startswith(f"{name}=")]
+    if value:
+        lines.append(f"{name}={value}")
+    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _load_config() -> dict:
@@ -448,6 +466,9 @@ def get_config():
     lt = cfg.get("live_trading", {})
     default_symbols = cfg.get("default_symbols", ["AAPL", "MSFT", "NVDA"])
 
+    ai = cfg.get("ai_analysis", {})
+    saved_key = _read_env_key("OPENROUTER_API_KEY")
+
     return {
         "capital": lt.get("initial_capital", cfg.get("default_capital", 10000)),
         "risk": 2.0,
@@ -465,6 +486,12 @@ def get_config():
         "notifications": True,
         "symbols": lt.get("symbols", default_symbols),
         "interval": lt.get("interval", "1h"),
+        # AI analysis
+        "ai_enabled": ai.get("enabled", False),
+        "ai_model": ai.get("model", "perplexity/sonar"),
+        "ai_score_weight": ai.get("score_weight", 0.3),
+        "ai_key_configured": bool(saved_key),
+        "ai_key_hint": f"{saved_key[:8]}••••" if saved_key else "",
     }
 
 
@@ -502,6 +529,17 @@ def save_config(body: dict):
             cfg["notifications"] = body["notifications"]
         if "max_positions" in body:
             cfg["max_positions"] = body["max_positions"]
+
+        # AI analysis settings
+        ai = cfg.setdefault("ai_analysis", {})
+        if "ai_enabled" in body:
+            ai["enabled"] = bool(body["ai_enabled"])
+        if "ai_model" in body:
+            ai["model"] = str(body["ai_model"])
+        if "ai_score_weight" in body:
+            ai["score_weight"] = float(body["ai_score_weight"])
+        if "ai_key" in body and body["ai_key"]:
+            _write_env_key("OPENROUTER_API_KEY", str(body["ai_key"]))
 
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
@@ -695,6 +733,51 @@ def deactivate_kill_switch():
     ks = KillSwitch()
     ks.deactivate()
     return {"active": ks.is_active}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# AI ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/api/ai/models")
+def get_ai_models():
+    """Return all models available on OpenRouter."""
+    import httpx
+    api_key = _read_env_key("OPENROUTER_API_KEY")
+    headers = {"HTTP-Referer": "https://tradeflow.local", "X-Title": "TradeFlow"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        with httpx.Client(timeout=10) as client:
+            r = client.get("https://openrouter.ai/api/v1/models", headers=headers)
+            r.raise_for_status()
+        models = r.json().get("data", [])
+        return {"models": sorted(m["id"] for m in models if "id" in m)}
+    except Exception as exc:
+        logger.warning("Failed to fetch OpenRouter models: %s", exc)
+        raise HTTPException(status_code=502, detail=f"OpenRouter unreachable: {exc}")
+
+
+@app.post("/api/ai/test")
+async def test_ai_connection(body: dict):
+    """Test OpenRouter connection with the given API key and model."""
+    import httpx
+    api_key = body.get("api_key") or _read_env_key("OPENROUTER_API_KEY")
+    model = body.get("model", "perplexity/sonar")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No API key provided")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "HTTP-Referer": "https://tradeflow.local"},
+                json={"model": model, "messages": [{"role": "user", "content": 'Reply with valid JSON only: {"score": 0.5}'}], "response_format": {"type": "json_object"}},
+            )
+            r.raise_for_status()
+        return {"success": True, "model": model}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
