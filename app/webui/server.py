@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -850,6 +851,85 @@ def get_dashboard_charts():
     indices.sort(key=lambda x: INDEX_META.index(next(m for m in INDEX_META if m["ticker"] == x["ticker"])))
 
     return {"capital": capital, "indices": indices}
+
+
+@app.get("/api/ai/score/{symbol}")
+def get_ai_score(symbol: str):
+    """Return cached AI score + rationale + sources for a ticker."""
+    sys.path.insert(0, str(_PROJECT_ROOT))
+    try:
+        from app.ai import score_store
+        cfg = _load_config()
+        ttl = cfg.get("ai_analysis", {}).get("score_ttl_seconds", 3600)
+        entry = score_store.get_entry(symbol.upper(), ttl=ttl)
+        if entry is None:
+            return {"available": False, "symbol": symbol.upper()}
+        return {
+            "available": True,
+            "symbol": symbol.upper(),
+            "score": entry["score"],
+            "rationale": entry["rationale"],
+            "sources": entry["sources"],
+            "ts": entry["ts"],
+            "age_seconds": int(time.time() - entry["ts"]),
+        }
+    except Exception as exc:
+        logger.warning("AI score fetch error for %s: %s", symbol, exc)
+        return {"available": False, "symbol": symbol.upper(), "error": str(exc)}
+
+
+@app.post("/api/ai/score/{symbol}")
+def trigger_ai_score(symbol: str):
+    """Trigger an immediate on-demand AI analysis for a ticker."""
+    import asyncio
+    import threading
+    cfg = _load_config()
+    ai_cfg = cfg.get("ai_analysis", {})
+    api_key = _read_env_key("OPENROUTER_API_KEY")
+    model = ai_cfg.get("model", "perplexity/sonar")
+    timeout = ai_cfg.get("timeout_seconds", 30)
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY non configurée")
+
+    try:
+        from app.ai.openrouter_client import fetch_ai_score
+        from app.ai import score_store
+
+        async def _run():
+            score, rationale, sources = await fetch_ai_score(symbol.upper(), model, api_key, timeout)
+            score_store.set_score(symbol.upper(), score, rationale, sources)
+            return score, rationale, sources
+
+        # Run async in a new event loop (we're in a sync FastAPI handler)
+        loop = asyncio.new_event_loop()
+        try:
+            score, rationale, sources = loop.run_until_complete(_run())
+        finally:
+            loop.close()
+
+        return {
+            "success": True,
+            "symbol": symbol.upper(),
+            "score": score,
+            "rationale": rationale,
+            "sources": sources,
+            "ts": time.time(),
+        }
+    except Exception as exc:
+        logger.error("On-demand AI analysis failed for %s: %s", symbol, exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/ai/force")
+def force_ai_analysis():
+    """Force an immediate AI analysis cycle even if markets are closed."""
+    try:
+        from app.ai import scheduler as ai_scheduler
+        ai_scheduler.force_now()
+        return {"success": True, "message": "Analyse forcée déclenchée"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/ai/models")

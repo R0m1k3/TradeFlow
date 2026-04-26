@@ -1,4 +1,4 @@
-"""Background AI analysis scheduler — runs in a daemon thread."""
+"""Background AI analysis scheduler — runs only when markets are open."""
 import asyncio
 import logging
 import os
@@ -15,9 +15,11 @@ logger = logging.getLogger(__name__)
 
 _thread: threading.Thread | None = None
 _stop_event = threading.Event()
+_force_event = threading.Event()   # set to trigger an immediate analysis cycle
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+SETTINGS_PATH = Path(__file__).resolve().parents[2] / "data" / "settings.json"
 
 
 def _load_config() -> dict:
@@ -26,13 +28,32 @@ def _load_config() -> dict:
 
 
 def _get_api_key() -> str:
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not key and ENV_PATH.exists():
+    import json as _json
+    # 1. data/settings.json (Docker-safe persistent storage)
+    if SETTINGS_PATH.exists():
+        try:
+            val = _json.loads(SETTINGS_PATH.read_text()).get("OPENROUTER_API_KEY", "")
+            if val:
+                return val
+        except Exception:
+            pass
+    # 2. .env file (local dev)
+    if ENV_PATH.exists():
         for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
             if line.startswith("OPENROUTER_API_KEY="):
                 key = line.split("=", 1)[1].strip()
-                break
-    return key
+                if key:
+                    return key
+    # 3. Environment variable
+    return os.environ.get("OPENROUTER_API_KEY", "")
+
+
+def _any_market_open() -> bool:
+    try:
+        from app.data.markets import any_market_open
+        return any_market_open()
+    except Exception:
+        return True  # fail open — don't block analysis if check fails
 
 
 async def _analyze_all(tickers: list[str], cfg: dict) -> None:
@@ -40,7 +61,6 @@ async def _analyze_all(tickers: list[str], cfg: dict) -> None:
     api_key = _get_api_key()
     model = ai_cfg.get("model", "perplexity/sonar")
     timeout = ai_cfg.get("timeout_seconds", 30)
-    ttl = ai_cfg.get("score_ttl_seconds", 3600)
 
     if not api_key:
         logger.warning("AI scheduler: OPENROUTER_API_KEY not set — skipping")
@@ -51,8 +71,8 @@ async def _analyze_all(tickers: list[str], cfg: dict) -> None:
     async def analyze_one(ticker: str) -> None:
         async with sem:
             try:
-                score, rationale = await fetch_ai_score(ticker, model, api_key, timeout)
-                score_store.set_score(ticker, score)
+                score, rationale, sources = await fetch_ai_score(ticker, model, api_key, timeout)
+                score_store.set_score(ticker, score, rationale, sources)
                 logger.info("AI score %s → %.2f | %s", ticker, score, rationale[:80])
             except Exception as exc:
                 logger.warning("AI score failed for %s: %s", ticker, exc)
@@ -67,12 +87,24 @@ def _run_loop(tickers: list[str]) -> None:
         while not _stop_event.is_set():
             cfg = _load_config()
             ai_cfg = cfg.get("ai_analysis", {})
+
             if not ai_cfg.get("enabled", False):
                 _stop_event.wait(timeout=60)
                 continue
 
+            market_open = _any_market_open()
+            forced = _force_event.is_set()
+            _force_event.clear()
+
+            if market_open or forced:
+                if not market_open and forced:
+                    logger.info("AI scheduler: forced analysis (market closed)")
+                loop.run_until_complete(_analyze_all(tickers, cfg))
+            else:
+                logger.debug("AI scheduler: markets closed — skipping cycle")
+
             interval = ai_cfg.get("interval_seconds", 1800)
-            loop.run_until_complete(_analyze_all(tickers, cfg))
+            # Wake up early if forced while sleeping
             _stop_event.wait(timeout=interval)
     finally:
         loop.close()
@@ -87,6 +119,11 @@ def start(tickers: list[str]) -> None:
     _thread = threading.Thread(target=_run_loop, args=(tickers,), daemon=True, name="ai-scheduler")
     _thread.start()
     logger.info("AI scheduler started for %d tickers", len(tickers))
+
+
+def force_now() -> None:
+    """Trigger an immediate analysis cycle regardless of market hours."""
+    _force_event.set()
 
 
 def stop() -> None:

@@ -36,9 +36,17 @@ Analyse le comportement probable de cette action sur les prochaines 24-48 heures
 sur les dernières actualités, la tendance du secteur, et le sentiment du marché.
 
 Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après :
-{{"score": <float entre 0.0 et 1.0>, "rationale": "<explication courte en français>"}}
+{{
+  "score": <float entre 0.0 et 1.0>,
+  "rationale": "<analyse concise en français, 2-3 phrases>",
+  "sources": [
+    {{"title": "<titre de la source>", "url": "<url complète>"}},
+    ...
+  ]
+}}
 
 0.0 = fort signal de vente, 0.5 = neutre, 1.0 = fort signal d'achat.
+Inclure 2 à 4 sources réelles et vérifiables utilisées pour l'analyse.
 """
 
 
@@ -47,8 +55,8 @@ async def fetch_ai_score(
     model: str,
     api_key: str,
     timeout: int = 30,
-) -> tuple[float, str]:
-    """Return (score 0-1, rationale). Raises on error."""
+) -> tuple[float, str, list]:
+    """Return (score 0-1, rationale, sources). Raises on error."""
     from datetime import datetime
     prompt = PROMPT_TEMPLATE.format(ticker=ticker, date=datetime.now().strftime("%Y-%m-%d %H:%M"))
 
@@ -73,7 +81,10 @@ async def fetch_ai_score(
     score = float(data["score"])
     score = max(0.0, min(1.0, score))
     rationale = data.get("rationale", "")
-    return score, rationale
+    sources = data.get("sources", [])
+    if not isinstance(sources, list):
+        sources = []
+    return score, rationale, sources
 
 
 async def test_connection(api_key: str, model: str, timeout: int = 15) -> bool:

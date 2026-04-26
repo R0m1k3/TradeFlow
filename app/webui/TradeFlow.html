@@ -1045,6 +1045,8 @@ body {
 }
 
 /* Responsive */
+@keyframes spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 900px) {
   .indices { grid-template-columns: repeat(2, 1fr); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1399,6 +1401,189 @@ function DashboardCharts() {
             </div>
         }
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AI ANALYSIS CARD — shown in DetailScreen
+// ═══════════════════════════════════════════════════════════════
+
+function ScoreGauge({ score }) {
+  const pct = Math.round(score * 100);
+  const color = score >= 0.65 ? COLOR_UP : score <= 0.35 ? COLOR_DOWN : '#F4A523';
+  const angle = -135 + score * 270; // arc from -135° to +135°
+  const r = 38, cx = 50, cy = 54;
+  const toRad = d => d * Math.PI / 180;
+  const arcPt = deg => [
+    cx + r * Math.cos(toRad(deg)),
+    cy + r * Math.sin(toRad(deg)),
+  ];
+  const startDeg = -135, endDeg = startDeg + score * 270;
+  const [sx, sy] = arcPt(startDeg);
+  const [ex, ey] = arcPt(endDeg);
+  const large = score * 270 > 180 ? 1 : 0;
+  const trackEnd = arcPt(135);
+  return (
+    <svg width="100" height="70" viewBox="0 0 100 70">
+      {/* Track */}
+      <path d={`M ${arcPt(-135).join(',')} A ${r} ${r} 0 1 1 ${arcPt(135).join(',')}`}
+        fill="none" stroke="var(--hairline-strong)" strokeWidth="6" strokeLinecap="round" />
+      {/* Fill */}
+      {score > 0 && (
+        <path d={`M ${sx},${sy} A ${r} ${r} 0 ${large} 1 ${ex},${ey}`}
+          fill="none" stroke={color} strokeWidth="6" strokeLinecap="round" />
+      )}
+      <text x="50" y="52" textAnchor="middle" fontSize="18" fontWeight="700"
+        fontFamily="Inter Tight, sans-serif" fill={color}>{pct}</text>
+      <text x="50" y="64" textAnchor="middle" fontSize="9" fill="var(--fg-4)"
+        fontFamily="Inter, sans-serif">/ 100</text>
+      <text x="14" y="72" textAnchor="middle" fontSize="8" fill="var(--fg-4)"
+        fontFamily="Inter, sans-serif">Vendre</text>
+      <text x="86" y="72" textAnchor="middle" fontSize="8" fill="var(--fg-4)"
+        fontFamily="Inter, sans-serif">Acheter</text>
+    </svg>
+  );
+}
+
+function AIAnalysisCard({ sym }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    apiFetch(`/api/ai/score/${encodeURIComponent(sym)}`)
+      .then(d => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, [sym]);
+
+  const runAnalysis = async () => {
+    setAnalyzing(true);
+    try {
+      const res = await apiFetch(`/api/ai/score/${encodeURIComponent(sym)}`, { method: 'POST' });
+      setData(res.success ? { available: true, ...res } : data);
+    } catch (e) {}
+    setAnalyzing(false);
+  };
+
+  const scoreLabel = s => s >= 0.65 ? 'Acheter' : s <= 0.35 ? 'Vendre' : 'Neutre';
+  const scoreColor = s => s >= 0.65 ? COLOR_UP : s <= 0.35 ? COLOR_DOWN : '#F4A523';
+  const fmtAge = secs => {
+    if (secs < 60) return `il y a ${secs}s`;
+    if (secs < 3600) return `il y a ${Math.floor(secs / 60)}min`;
+    return `il y a ${Math.floor(secs / 3600)}h`;
+  };
+
+  return (
+    <div style={{
+      background: 'var(--bg-elev-grad), var(--bg-elev)',
+      border: '0.5px solid var(--hairline)',
+      borderRadius: 18,
+      padding: '24px 28px',
+      boxShadow: 'var(--shadow-md)',
+      marginBottom: 20,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-3)', marginBottom: 4 }}>
+            Analyse IA
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>
+            Sentiment du marché · {sym}
+          </div>
+        </div>
+        <button
+          className="btn"
+          onClick={runAnalysis}
+          disabled={analyzing}
+          style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          {analyzing
+            ? <><span style={{ display: 'inline-block', width: 10, height: 10, border: `2px solid var(--fg-3)`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Analyse en cours…</>
+            : '⚡ Analyser maintenant'
+          }
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', gap: 20 }}>
+          <div className="shimmer" style={{ width: 100, height: 70, borderRadius: 12, flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div className="shimmer" style={{ width: '60%', height: 14, marginBottom: 10, borderRadius: 6 }} />
+            <div className="shimmer" style={{ width: '100%', height: 12, marginBottom: 8, borderRadius: 6 }} />
+            <div className="shimmer" style={{ width: '80%', height: 12, borderRadius: 6 }} />
+          </div>
+        </div>
+      ) : !data?.available ? (
+        <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--fg-4)' }}>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>Aucune analyse disponible pour ce ticker.</div>
+          <div style={{ fontSize: 12, color: 'var(--fg-4)' }}>Cliquez sur "Analyser maintenant" ou activez l'IA dans la configuration.</div>
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+            {/* Gauge */}
+            <div style={{ flexShrink: 0, textAlign: 'center' }}>
+              <ScoreGauge score={data.score} />
+              <div style={{
+                fontSize: 12, fontWeight: 700, marginTop: 2,
+                color: scoreColor(data.score),
+              }}>{scoreLabel(data.score)}</div>
+            </div>
+
+            {/* Rationale */}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--fg-2)', marginBottom: 16 }}>
+                {data.rationale || 'Aucune analyse disponible.'}
+              </div>
+
+              {/* Sources */}
+              {data.sources?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--fg-4)', marginBottom: 8 }}>
+                    Sources
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {data.sources.map((src, i) => (
+                      <a key={i} href={src.url} target="_blank" rel="noopener noreferrer"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          fontSize: 12, color: 'var(--fg-3)',
+                          textDecoration: 'none', padding: '6px 10px',
+                          background: 'var(--bg-tint)', borderRadius: 8,
+                          border: '0.5px solid var(--hairline)',
+                          transition: 'color 0.15s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+                        onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
+                      >
+                        <span style={{ flexShrink: 0, fontSize: 14 }}>🔗</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {src.title || src.url}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '0.5px solid var(--hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>
+              Analysé {fmtAge(data.age_seconds)} · Score {(data.score * 100).toFixed(0)}/100
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>
+              Actualisé automatiquement toutes les 30 min · marchés ouverts
+            </span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1947,6 +2132,8 @@ function DetailScreen({ stock, onBack }) {
           )}
         </div>
       </div>
+
+      <AIAnalysisCard sym={d.sym} />
 
       <div className="stats-grid">
         {statsData.map(s => (
