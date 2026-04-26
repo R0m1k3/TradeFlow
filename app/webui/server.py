@@ -27,7 +27,7 @@ import yfinance as yf
 import asyncio
 import queue
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -80,6 +80,7 @@ BOT_PID_FILE = _PROJECT_ROOT / "data" / "bot.pid"
 CONFIG_FILE = _PROJECT_ROOT / "config.yaml"
 ENV_FILE = _PROJECT_ROOT / ".env"
 DATA_DIR = _PROJECT_ROOT / "data"
+SETTINGS_FILE = DATA_DIR / "settings.json"   # persistent across Docker restarts
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -88,21 +89,54 @@ init_database()
 # ── Helpers ───────────────────────────────────────────────────────────────────────
 
 
+def _load_settings() -> dict:
+    """Load persistent user settings from data/settings.json (survives Docker restarts)."""
+    if SETTINGS_FILE.exists():
+        try:
+            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_settings(settings: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+
 def _read_env_key(name: str) -> str:
-    if not ENV_FILE.exists():
-        return ""
-    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-        if line.startswith(f"{name}="):
-            return line.split("=", 1)[1].strip()
-    return ""
+    """Read a key from settings.json first, then .env, then environment variables."""
+    # 1. Persistent settings file (works in Docker with volume mount)
+    val = _load_settings().get(name, "")
+    if val:
+        return val
+    # 2. .env file (local dev)
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1].strip()
+    # 3. Environment variable (docker-compose environment section)
+    return os.environ.get(name, "")
 
 
 def _write_env_key(name: str, value: str) -> None:
-    lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
-    lines = [l for l in lines if not l.startswith(f"{name}=")]
+    """Persist a key to settings.json (Docker-safe) and .env (local dev)."""
+    settings = _load_settings()
     if value:
-        lines.append(f"{name}={value}")
-    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        settings[name] = value
+    else:
+        settings.pop(name, None)
+    _save_settings(settings)
+    # Also write to .env for local dev convenience
+    if ENV_FILE.exists() or not DATA_DIR.exists():
+        lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
+        lines = [l for l in lines if not l.startswith(f"{name}=")]
+        if value:
+            lines.append(f"{name}={value}")
+        try:
+            ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception:
+            pass
 
 
 def _load_config() -> dict:
@@ -496,7 +530,7 @@ def get_config():
 
 
 @app.post("/api/config")
-def save_config(body: dict):
+def save_config(body: dict = Body(default={})):
     """Save configuration to config.yaml."""
     try:
         import yaml
@@ -740,18 +774,95 @@ def deactivate_kill_switch():
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
+@app.get("/api/dashboard/charts")
+def get_dashboard_charts():
+    """Return weekly capital history + market indices history for dashboard charts."""
+    from datetime import timedelta
+    import yfinance as yf
+
+    INDEX_META = [
+        {"ticker": "^IXIC",  "name": "NASDAQ",   "color": "#5AFF8C"},
+        {"ticker": "^DJI",   "name": "Dow Jones", "color": "#4DABF7"},
+        {"ticker": "^FCHI",  "name": "CAC 40",    "color": "#FFD43B"},
+        {"ticker": "^GDAXI", "name": "DAX 40",    "color": "#FF8787"},
+    ]
+
+    # ── Capital history (portfolio snapshots, last 7 days) ─────────────────────
+    capital = {"dates": [], "values": [], "change_pct": 0.0}
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        with get_session() as session:
+            snaps = (
+                session.query(PortfolioModel)
+                .filter(PortfolioModel.timestamp >= cutoff)
+                .order_by(PortfolioModel.timestamp.asc())
+                .all()
+            )
+        if snaps:
+            dates = [s.timestamp[:10] if isinstance(s.timestamp, str) else str(s.timestamp)[:10] for s in snaps]
+            values = [float(s.total_value) for s in snaps]
+            first, last = values[0], values[-1]
+            change_pct = round((last - first) / first * 100, 2) if first else 0.0
+            capital = {"dates": dates, "values": values, "change_pct": change_pct}
+    except Exception as exc:
+        logger.warning("Capital history error: %s", exc)
+
+    # ── Market indices history (1h candles, 5d) ────────────────────────────────
+    indices = []
+    def _fetch_index(meta: dict) -> dict | None:
+        try:
+            ticker = yf.Ticker(meta["ticker"])
+            hist = ticker.history(period="5d", interval="1h")
+            if hist is None or hist.empty:
+                return None
+            close_col = "Close" if "Close" in hist.columns else "close"
+            prices = [round(float(v), 2) for v in hist[close_col].tolist() if not pd.isna(v)]
+            dates_raw = [str(idx) for idx in hist.index]
+            if not prices:
+                return None
+            first = prices[0]
+            last = prices[-1]
+            change_pct = round((last - first) / first * 100, 2) if first else 0.0
+            # Normalize to base 100 for multi-line comparison
+            normalized = [round(v / first * 100, 3) for v in prices]
+            return {
+                "ticker": meta["ticker"],
+                "name": meta["name"],
+                "color": meta["color"],
+                "dates": dates_raw,
+                "values": prices,
+                "normalized": normalized,
+                "change_pct": change_pct,
+                "last": last,
+            }
+        except Exception as exc:
+            logger.warning("Index fetch failed %s: %s", meta["ticker"], exc)
+            return None
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = {pool.submit(_fetch_index, m): m for m in INDEX_META}
+        for fut in as_completed(futs):
+            result = fut.result()
+            if result:
+                indices.append(result)
+
+    indices.sort(key=lambda x: INDEX_META.index(next(m for m in INDEX_META if m["ticker"] == x["ticker"])))
+
+    return {"capital": capital, "indices": indices}
+
+
 @app.get("/api/ai/models")
 def get_ai_models():
     """Return all models available on OpenRouter."""
-    import httpx
+    import requests as req
     api_key = _read_env_key("OPENROUTER_API_KEY")
     headers = {"HTTP-Referer": "https://tradeflow.local", "X-Title": "TradeFlow"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     try:
-        with httpx.Client(timeout=10) as client:
-            r = client.get("https://openrouter.ai/api/v1/models", headers=headers)
-            r.raise_for_status()
+        r = req.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=10)
+        r.raise_for_status()
         models = r.json().get("data", [])
         return {"models": sorted(m["id"] for m in models if "id" in m)}
     except Exception as exc:
@@ -760,21 +871,21 @@ def get_ai_models():
 
 
 @app.post("/api/ai/test")
-async def test_ai_connection(body: dict):
+def test_ai_connection(body: dict = Body(default={})):
     """Test OpenRouter connection with the given API key and model."""
-    import httpx
+    import requests as req
     api_key = body.get("api_key") or _read_env_key("OPENROUTER_API_KEY")
     model = body.get("model", "perplexity/sonar")
     if not api_key:
         raise HTTPException(status_code=400, detail="No API key provided")
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "HTTP-Referer": "https://tradeflow.local"},
-                json={"model": model, "messages": [{"role": "user", "content": 'Reply with valid JSON only: {"score": 0.5}'}], "response_format": {"type": "json_object"}},
-            )
-            r.raise_for_status()
+        r = req.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "HTTP-Referer": "https://tradeflow.local"},
+            json={"model": model, "messages": [{"role": "user", "content": 'Reply with valid JSON only: {"score": 0.5}'}], "response_format": {"type": "json_object"}},
+            timeout=15,
+        )
+        r.raise_for_status()
         return {"success": True, "model": model}
     except Exception as exc:
         return {"success": False, "error": str(exc)}

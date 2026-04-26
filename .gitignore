@@ -20,6 +20,7 @@ data/*.db-wal
 data/bot.pid
 data/bot.log
 data/stock_names.json
+data/settings.json
 
 # Environment variables
 .env

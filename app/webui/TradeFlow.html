@@ -1052,6 +1052,7 @@ body {
   .detail-title { font-size: 32px; }
   .detail-price { font-size: 40px; }
   .app { padding: 12px 16px 60px; }
+  .dash-charts { grid-template-columns: 1fr !important; }
 }
 @media (max-width: 600px) {
   .indices { grid-template-columns: 1fr; }
@@ -1189,6 +1190,216 @@ function Sparkline({ data, color, width = 120, height = 32, fill = false, stroke
       <path d={path} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"/>
       {data?.length > 0 && <circle cx={width} cy={lastY} r="2" fill={color} />}
     </svg>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LINE CHART — reusable SVG chart with grid + optional multi-line
+// ═══════════════════════════════════════════════════════════════
+
+function LineChart({ series, width = 600, height = 140, fill = true, showDots = false, yLabel = v => v, xLabels = [] }) {
+  const allValues = series.flatMap(s => s.data);
+  if (!allValues.length) return <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-4)', fontSize: 13 }}>Données insuffisantes</div>;
+
+  const PAD = { top: 12, right: 12, bottom: 28, left: 52 };
+  const W = width - PAD.left - PAD.right;
+  const H = height - PAD.top - PAD.bottom;
+
+  const minV = Math.min(...allValues);
+  const maxV = Math.max(...allValues);
+  const rangeV = maxV - minV || 1;
+
+  const toX = (i, len) => PAD.left + (i / Math.max(len - 1, 1)) * W;
+  const toY = (v) => PAD.top + H - ((v - minV) / rangeV) * H;
+
+  // Grid lines (4 horizontal)
+  const gridLines = [0, 0.33, 0.66, 1].map(t => {
+    const v = minV + t * rangeV;
+    const y = toY(v);
+    return { y, label: yLabel(v) };
+  });
+
+  const gradId = `lcg-${series[0]?.color?.replace('#','') ?? 'x'}`;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', overflow: 'visible' }}>
+      <defs>
+        {series.map(s => (
+          <linearGradient key={s.color} id={`lcg-${s.color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0"   stopColor={s.color} stopOpacity="0.22"/>
+            <stop offset="0.7" stopColor={s.color} stopOpacity="0.04"/>
+            <stop offset="1"   stopColor={s.color} stopOpacity="0"/>
+          </linearGradient>
+        ))}
+      </defs>
+
+      {/* Horizontal grid */}
+      {gridLines.map(({y, label}, i) => (
+        <g key={i}>
+          <line x1={PAD.left} y1={y} x2={PAD.left + W} y2={y}
+            stroke="var(--hairline)" strokeWidth="0.5" strokeDasharray="4 4" />
+          <text x={PAD.left - 6} y={y + 4} textAnchor="end"
+            fill="var(--fg-4)" fontSize="10" fontFamily="Inter, sans-serif">{label}</text>
+        </g>
+      ))}
+
+      {/* Vertical grid + x-labels */}
+      {xLabels.map((lbl, i) => {
+        const x = toX(Math.round(i * (series[0]?.data?.length - 1) / Math.max(xLabels.length - 1, 1)), series[0]?.data?.length);
+        return (
+          <g key={i}>
+            <line x1={x} y1={PAD.top} x2={x} y2={PAD.top + H}
+              stroke="var(--hairline)" strokeWidth="0.5" strokeDasharray="4 4" />
+            <text x={x} y={PAD.top + H + 16} textAnchor="middle"
+              fill="var(--fg-4)" fontSize="10" fontFamily="Inter, sans-serif">{lbl}</text>
+          </g>
+        );
+      })}
+
+      {/* Series */}
+      {series.map(s => {
+        if (!s.data.length) return null;
+        const pts = s.data.map((v, i) => [toX(i, s.data.length), toY(v)]);
+        const pathD = pts.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(' ');
+        const lastPt = pts[pts.length - 1];
+        const areaD = `${pathD} L${lastPt[0]},${PAD.top + H} L${PAD.left},${PAD.top + H} Z`;
+        return (
+          <g key={s.color}>
+            {fill && series.length === 1 && <path d={areaD} fill={`url(#lcg-${s.color.replace('#','')})`} />}
+            <path d={pathD} fill="none" stroke={s.color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+            {showDots && pts.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="2.5" fill={s.color} />)}
+            <circle cx={lastPt[0]} cy={lastPt[1]} r="3" fill={s.color} />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD CHARTS — capital + marchés sur une semaine
+// ═══════════════════════════════════════════════════════════════
+
+function DashboardCharts() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch('/api/dashboard/charts')
+      .then(d => setData(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <div className="shimmer" style={{ height: 200, borderRadius: 18 }} />
+        <div className="shimmer" style={{ height: 200, borderRadius: 18 }} />
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { capital, indices } = data;
+  const hasCapital = capital?.values?.length > 1;
+
+  // Build 5 day labels from Mon to Fri
+  const DAY_NAMES = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  const xLabels = (() => {
+    if (!indices[0]?.dates?.length) return ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven'];
+    const n = indices[0].dates.length;
+    const step = Math.floor(n / 4);
+    return [0, step, step*2, step*3, n-1].map(i => {
+      const d = new Date(indices[0].dates[Math.min(i, n-1)]);
+      return DAY_NAMES[d.getDay()] || '';
+    });
+  })();
+
+  const capColor = hasCapital && capital.change_pct >= 0 ? COLOR_UP : COLOR_DOWN;
+
+  return (
+    <div className="dash-charts" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+
+      {/* Capital */}
+      <div style={{
+        background: 'var(--bg-elev-grad), var(--bg-elev)',
+        border: '0.5px solid var(--hairline)',
+        borderRadius: 18,
+        padding: '20px 24px',
+        boxShadow: 'var(--shadow-md)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-3)', marginBottom: 4 }}>Capital — 7 jours</div>
+            {hasCapital
+              ? <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'Inter Tight, sans-serif', color: 'var(--fg)' }}>
+                  {fmt(capital.values[capital.values.length - 1], 0)} €
+                </div>
+              : <div style={{ fontSize: 14, color: 'var(--fg-3)' }}>Bot non démarré</div>
+            }
+          </div>
+          {hasCapital && (
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: capColor,
+              background: capital.change_pct >= 0 ? 'var(--up-soft)' : 'var(--down-soft)',
+              padding: '4px 10px', borderRadius: 20,
+            }}>
+              {capital.change_pct >= 0 ? '+' : ''}{capital.change_pct}%
+            </div>
+          )}
+        </div>
+        {hasCapital
+          ? <LineChart
+              series={[{ data: capital.values, color: capColor }]}
+              height={130}
+              yLabel={v => `${fmt(v, 0)}€`}
+              xLabels={xLabels}
+            />
+          : <div style={{ height: 130, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-4)', gap: 6 }}>
+              <Icon name="chart" size={28} />
+              <div style={{ fontSize: 12 }}>Démarrez le bot pour voir l'évolution</div>
+            </div>
+        }
+      </div>
+
+      {/* Marchés */}
+      <div style={{
+        background: 'var(--bg-elev-grad), var(--bg-elev)',
+        border: '0.5px solid var(--hairline)',
+        borderRadius: 18,
+        padding: '20px 24px',
+        boxShadow: 'var(--shadow-md)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-3)' }}>Marchés — 7 jours</div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {indices.map(idx => (
+              <div key={idx.ticker} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: idx.color }} />
+                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{idx.name}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: idx.change_pct >= 0 ? COLOR_UP : COLOR_DOWN }}>
+                  {idx.change_pct >= 0 ? '+' : ''}{idx.change_pct}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {indices.length > 0
+          ? <LineChart
+              series={indices.map(idx => ({ data: idx.normalized, color: idx.color }))}
+              height={130}
+              fill={false}
+              yLabel={v => `${v.toFixed(0)}`}
+              xLabels={xLabels}
+            />
+          : <div style={{ height: 130, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-4)', fontSize: 12 }}>
+              Chargement des indices…
+            </div>
+        }
+      </div>
+    </div>
   );
 }
 
@@ -1470,6 +1681,8 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
         <span style={{ color: 'var(--fg-4)' }}>·</span>
         <span>Le bot peut trader pendant les sessions actives</span>
       </p>
+
+      <DashboardCharts />
 
       <RiskPanel />
 
