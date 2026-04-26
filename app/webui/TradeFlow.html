@@ -2220,6 +2220,7 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
 
   // AI state
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiMode, setAiMode] = useState('hybrid');
   const [aiModel, setAiModel] = useState('perplexity/sonar');
   const [aiKey, setAiKey] = useState('');
   const [aiKeyHint, setAiKeyHint] = useState('');
@@ -2241,6 +2242,7 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         setAutoSell(cfg.auto_sell !== false);
         setNotifications(cfg.notifications !== false);
         setAiEnabled(cfg.ai_enabled || false);
+        setAiMode(cfg.ai_mode || 'hybrid');
         setAiModel(cfg.ai_model || 'perplexity/sonar');
         setAiWeight(cfg.ai_score_weight ?? 0.3);
         setAiKeyHint(cfg.ai_key_hint || '');
@@ -2285,7 +2287,7 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         body: JSON.stringify({
           capital, strategy, max_positions: maxPos, min_score: minScore,
           auto_buy: autoBuy, auto_sell: autoSell, notifications,
-          ai_enabled: aiEnabled, ai_model: aiModel, ai_score_weight: aiWeight,
+          ai_enabled: aiEnabled, ai_mode: aiMode, ai_model: aiModel, ai_score_weight: aiWeight,
           ai_key: aiKey || undefined,
         }),
       });
@@ -2453,15 +2455,46 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
 
         <div className="config-card">
           <h3>Analyse IA</h3>
-          <div className="sub">Scoring automatique via OpenRouter — enrichit les signaux du bot.</div>
+          <div className="sub">Analyse de marché via OpenRouter — deux modes disponibles.</div>
 
           <div className="field">
             <div>
               <div className="field-label">Activer l'analyse IA</div>
-              <div className="field-hint">Score 0–1 calculé toutes les 30 min par ticker</div>
+              <div className="field-hint">Score calculé toutes les 30 min par ticker</div>
             </div>
             <div className={`toggle ${aiEnabled ? 'on' : ''}`} onClick={() => setAiEnabled(!aiEnabled)} />
           </div>
+
+          {aiEnabled && (
+            <div style={{ marginBottom: 8 }}>
+              <div className="field-label" style={{ marginBottom: 8 }}>Mode IA</div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                {[
+                  { val: 'hybrid', label: 'Hybride', desc: "Score 0–1 qui enrichit l'algorithme" },
+                  { val: 'autonomous', label: 'Agent autonome', desc: "L'IA décide seule (ARIA)" },
+                ].map(opt => (
+                  <div
+                    key={opt.val}
+                    onClick={() => setAiMode(opt.val)}
+                    style={{
+                      flex: 1, padding: '12px 14px', borderRadius: 12, cursor: 'pointer',
+                      border: `2px solid ${aiMode === opt.val ? 'var(--accent)' : 'var(--hairline-strong)'}`,
+                      background: aiMode === opt.val ? 'var(--accent-soft)' : 'var(--bg-tint)',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 13, color: aiMode === opt.val ? 'var(--accent)' : 'var(--fg)' }}>{opt.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 3 }}>{opt.desc}</div>
+                  </div>
+                ))}
+              </div>
+              {aiMode === 'autonomous' && (
+                <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(90,255,140,0.07)', borderRadius: 10, borderLeft: '3px solid var(--accent)', fontSize: 12, color: 'var(--fg-2)' }}>
+                  En mode Agent autonome, ARIA analyse chaque ticker et prend ses propres décisions — BUY, SELL ou HOLD — avec position size, stop-loss et take-profit. L'algorithme traditionnel est contourné.
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
             <div className="field-label">Clé API OpenRouter</div>
@@ -2500,16 +2533,18 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
             <div className="field-hint">{aiModels.length > 0 ? `${aiModels.length} modèles disponibles` : 'Entrez votre clé API pour charger la liste complète'}</div>
           </div>
 
-          <div className="field">
-            <div>
-              <div className="field-label">Poids du score IA</div>
-              <div className="field-hint">Influence sur la décision finale</div>
+          {aiMode === 'hybrid' && (
+            <div className="field">
+              <div>
+                <div className="field-label">Poids du score IA</div>
+                <div className="field-hint">Influence sur la décision finale de l'algorithme</div>
+              </div>
+              <div className="slider-row" style={{ width: 200 }}>
+                <input type="range" min="0" max="1" step="0.05" value={aiWeight} onChange={e => setAiWeight(+e.target.value)} />
+                <span className="val tnum">{Math.round(aiWeight * 100)}%</span>
+              </div>
             </div>
-            <div className="slider-row" style={{ width: 200 }}>
-              <input type="range" min="0" max="1" step="0.05" value={aiWeight} onChange={e => setAiWeight(+e.target.value)} />
-              <span className="val tnum">{Math.round(aiWeight * 100)}%</span>
-            </div>
-          </div>
+          )}
 
           <div style={{ marginTop: 8 }}>
             <button
@@ -2547,7 +2582,9 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
           <div className="field">
             <div className="field-label">Analyse IA</div>
             <div style={{ color: aiEnabled ? 'var(--up)' : 'var(--fg-3)', fontWeight: 500 }}>
-              {aiEnabled ? `Actif — poids ${Math.round(aiWeight * 100)}%` : 'Désactivée'}
+              {aiEnabled
+                ? aiMode === 'autonomous' ? 'Agent autonome (ARIA)' : `Hybride — poids ${Math.round(aiWeight * 100)}%`
+                : 'Désactivée'}
             </div>
           </div>
           {aiEnabled && (
@@ -2557,6 +2594,221 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
             </div>
           )}
         </div>
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AI AGENT SCREEN — ARIA autonomous trading decisions
+// ═══════════════════════════════════════════════════════════════
+
+function DecisionBadge({ action }) {
+  const map = {
+    BUY:  { color: 'var(--up)',   bg: 'var(--up-soft)' },
+    SELL: { color: 'var(--down)', bg: 'var(--down-soft)' },
+    HOLD: { color: 'var(--fg-3)', bg: 'var(--chip-bg)' },
+  };
+  const s = map[action] || map.HOLD;
+  return (
+    <span style={{ padding: '3px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, color: s.color, background: s.bg, letterSpacing: '0.05em' }}>
+      {action || '—'}
+    </span>
+  );
+}
+
+function ConfidenceBar({ value }) {
+  const pct = Math.round((value || 0) * 100);
+  const color = pct >= 75 ? 'var(--up)' : pct >= 50 ? '#fbbf24' : 'var(--down)';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, height: 5, background: 'var(--hairline-strong)', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.4s ease' }} />
+      </div>
+      <span style={{ fontSize: 12, fontWeight: 600, color, minWidth: 32, textAlign: 'right' }}>{pct}%</span>
+    </div>
+  );
+}
+
+function AgentTickerCard({ sym, decision: d, onAnalyze, analyzing }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const ageMin = d ? Math.round((Date.now() / 1000 - d.ts) / 60) : null;
+
+  return (
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 17, fontWeight: 700, fontFamily: 'Inter Tight, sans-serif' }}>{sym}</span>
+          {d && <DecisionBadge action={d.action} />}
+        </div>
+        <button
+          className="btn"
+          style={{ fontSize: 12, padding: '5px 12px' }}
+          onClick={() => onAnalyze(sym)}
+          disabled={analyzing}
+        >
+          {analyzing
+            ? <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />Analyse...</span>
+            : '⚡ Analyser'}
+        </button>
+      </div>
+
+      {d ? (
+        <>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 5 }}>CONFIANCE</div>
+            <ConfidenceBar value={d.confidence} />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+            {[
+              { label: 'Position', val: `${(d.position_size_pct || 0).toFixed(1)}%`, color: 'var(--fg)' },
+              { label: 'Stop-loss', val: `-${(d.stop_loss_pct || 0).toFixed(1)}%`, color: 'var(--down)' },
+              { label: 'Take-profit', val: `+${(d.take_profit_pct || 0).toFixed(1)}%`, color: 'var(--up)' },
+              { label: 'Horizon', val: d.time_horizon || '24h', color: 'var(--fg)' },
+            ].map(p => (
+              <div key={p.label} style={{ textAlign: 'center', padding: '7px 4px', background: 'var(--bg-tint)', borderRadius: 10 }}>
+                <div style={{ fontSize: 10, color: 'var(--fg-4)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{p.label}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: p.color, fontVariantNumeric: 'tabular-nums' }}>{p.val}</div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 5 }}>ANALYSE</div>
+            <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.6 }}>
+              {expanded || !d.rationale || d.rationale.length <= 160
+                ? d.rationale
+                : d.rationale.substring(0, 160) + '…'}
+              {d.rationale && d.rationale.length > 160 && (
+                <span onClick={() => setExpanded(e => !e)} style={{ color: 'var(--accent)', cursor: 'pointer', marginLeft: 5, fontSize: 12 }}>
+                  {expanded ? 'Moins' : 'Plus'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {d.key_risks && (
+            <div style={{ background: 'rgba(255,77,94,0.08)', borderRadius: 10, padding: '9px 13px', fontSize: 12, color: 'var(--fg-2)', borderLeft: '3px solid var(--down)' }}>
+              ⚠ {d.key_risks}
+            </div>
+          )}
+
+          {d.sources && d.sources.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 5 }}>SOURCES</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {d.sources.map((s, i) => (
+                  <a key={i} href={s.url} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none', background: 'var(--accent-soft)', padding: '3px 9px', borderRadius: 10, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.title || `Source ${i + 1}`}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ fontSize: 11, color: 'var(--fg-4)', borderTop: '1px solid var(--hairline)', paddingTop: 9 }}>
+            Analysé {ageMin !== null ? (ageMin < 1 ? 'à l\'instant' : `il y a ${ageMin} min`) : ''}
+          </div>
+        </>
+      ) : (
+        <div style={{ padding: '28px 0', textAlign: 'center', color: 'var(--fg-4)', fontSize: 13 }}>
+          Pas encore analysé — cliquez sur ⚡ Analyser
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AIAgentScreen({ onBack }) {
+  const [decisions, setDecisions] = React.useState({});
+  const [tickers, setTickers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [analyzing, setAnalyzing] = React.useState({});
+  const [analyzingAll, setAnalyzingAll] = React.useState(false);
+  const [statusMsg, setStatusMsg] = React.useState('');
+
+  const loadAll = React.useCallback(async () => {
+    try {
+      const [cfg, dec] = await Promise.all([apiFetch('/api/config'), apiFetch('/api/ai/decisions')]);
+      setTickers(cfg.symbols || []);
+      setDecisions(dec.decisions || {});
+    } catch (e) {}
+  }, []);
+
+  React.useEffect(() => {
+    loadAll().finally(() => setLoading(false));
+  }, [loadAll]);
+
+  const analyzeOne = async (sym) => {
+    setAnalyzing(a => ({ ...a, [sym]: true }));
+    try {
+      const res = await apiFetch(`/api/ai/decisions/${encodeURIComponent(sym)}`, { method: 'POST' });
+      if (res.available) setDecisions(d => ({ ...d, [sym]: res }));
+    } catch (e) { setStatusMsg('Erreur : ' + e.message); setTimeout(() => setStatusMsg(''), 4000); }
+    setAnalyzing(a => ({ ...a, [sym]: false }));
+  };
+
+  const analyzeAll = async () => {
+    setAnalyzingAll(true);
+    setStatusMsg('');
+    try {
+      const res = await apiFetch('/api/ai/analyze-all', { method: 'POST' });
+      setStatusMsg(res.message || 'Analyse lancée…');
+      setTimeout(async () => { await loadAll(); setStatusMsg(''); }, 45000);
+    } catch (e) { setStatusMsg('Erreur : ' + e.message); }
+    setAnalyzingAll(false);
+  };
+
+  if (loading) return (
+    <>
+      <div className="back-btn" onClick={onBack}><Icon name="arrow-left" size={16} /> Retour aux marchés</div>
+      <div style={{ padding: '40px 0' }}>
+        {[1, 2, 3].map(i => <div key={i} className="shimmer" style={{ height: 260, borderRadius: 18, marginBottom: 16 }} />)}
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      <div className="back-btn" onClick={onBack}><Icon name="arrow-left" size={16} /> Retour aux marchés</div>
+
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, fontFamily: 'Inter Tight, sans-serif' }}>Agent IA Autonome</h1>
+          <span style={{ background: 'var(--accent-soft)', color: 'var(--accent)', padding: '4px 13px', borderRadius: 20, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em' }}>ARIA</span>
+        </div>
+        <p style={{ color: 'var(--fg-3)', fontSize: 14, margin: '0 0 18px', lineHeight: 1.5 }}>
+          ARIA analyse chaque ticker en temps réel — actualités, X/𝕏, indicateurs techniques, données fondamentales —
+          et prend ses propres décisions de trading avec gestion du risque intégrée.
+        </p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn accent" onClick={analyzeAll} disabled={analyzingAll} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {analyzingAll
+              ? <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />Analyse en cours…</>
+              : '⚡ Analyser tous les tickers'}
+          </button>
+          <button className="btn" onClick={loadAll} style={{ fontSize: 13 }}>Actualiser</button>
+          {statusMsg && <span style={{ fontSize: 13, color: 'var(--fg-3)' }}>{statusMsg}</span>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 16, marginBottom: 40 }}>
+        {tickers.map(sym => (
+          <AgentTickerCard
+            key={sym}
+            sym={sym}
+            decision={decisions[sym]}
+            onAnalyze={analyzeOne}
+            analyzing={!!analyzing[sym]}
+          />
+        ))}
+        {tickers.length === 0 && (
+          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px 0', color: 'var(--fg-4)' }}>
+            Aucun ticker configuré — allez dans <strong>Configuration</strong> pour en ajouter.
+          </div>
+        )}
       </div>
     </>
   );
@@ -2596,6 +2848,7 @@ function App() {
 
   const openStock = (s) => { setActiveStock(s); setScreen('detail'); window.scrollTo(0, 0); };
   const openConfig = () => { setScreen('config'); window.scrollTo(0, 0); };
+  const openAgent = () => { setScreen('agent'); window.scrollTo(0, 0); };
   const goHome = () => { setScreen('home'); };
 
   return (
@@ -2608,6 +2861,7 @@ function App() {
         <div className="nav-links">
           <span className={`nav-link ${screen === 'home' ? 'active' : ''}`} onClick={goHome}>Marchés</span>
           <span className={`nav-link ${screen === 'detail' ? 'active' : ''}`} onClick={() => activeStock && setScreen('detail')}>Analyse</span>
+          <span className={`nav-link ${screen === 'agent' ? 'active' : ''}`} onClick={openAgent}>Agent IA</span>
           <span className={`nav-link ${screen === 'config' ? 'active' : ''}`} onClick={openConfig}>Bot</span>
         </div>
         <div className="nav-spacer" />
@@ -2629,6 +2883,9 @@ function App() {
       )}
       {screen === 'detail' && activeStock && (
         <DetailScreen stock={activeStock} onBack={goHome} />
+      )}
+      {screen === 'agent' && (
+        <AIAgentScreen onBack={goHome} />
       )}
       {screen === 'config' && (
         <ConfigScreen onBack={goHome} botActive={botActive} setBotActive={setBotActive} />

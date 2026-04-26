@@ -526,6 +526,7 @@ def get_config():
         "interval": lt.get("interval", "1h"),
         # AI analysis
         "ai_enabled": ai.get("enabled", False),
+        "ai_mode": ai.get("mode", "hybrid"),
         "ai_model": ai.get("model", "perplexity/sonar"),
         "ai_score_weight": ai.get("score_weight", 0.3),
         "ai_key_configured": bool(saved_key),
@@ -572,6 +573,8 @@ def save_config(body: dict = Body(default={})):
         ai = cfg.setdefault("ai_analysis", {})
         if "ai_enabled" in body:
             ai["enabled"] = bool(body["ai_enabled"])
+        if "ai_mode" in body and body["ai_mode"] in ("hybrid", "autonomous"):
+            ai["mode"] = body["ai_mode"]
         if "ai_model" in body:
             ai["model"] = str(body["ai_model"])
         if "ai_score_weight" in body:
@@ -1000,6 +1003,147 @@ def test_ai_connection(body: dict = Body(default={})):
         return {"success": True, "model": model}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+
+# ── Autonomous AI agent ──────────────────────────────────────────────────────────
+
+_AUTONOMOUS_PROMPT = """\
+Tu es ARIA (Autonomous Research & Investment Agent), un agent de trading algorithmique expert \
+avec plus de 20 ans d'expérience sur les marchés financiers mondiaux \
+(NYSE, NASDAQ, Euronext, LSE, TSE).
+
+TICKER ANALYSÉ : {ticker}
+DATE ET HEURE  : {date}
+
+SOURCES À CONSULTER OBLIGATOIREMENT :
+1. Actualités financières récentes (Bloomberg, Reuters, FT, WSJ — dernières 48h)
+2. Publications récentes sur X (Twitter/𝕏) : analystes, dirigeants, institutionnels, retail
+3. Indicateurs techniques : tendance, momentum, niveaux support/résistance
+4. Données fondamentales : valorisation, résultats récents, guidances, dividendes
+5. Contexte sectoriel et macro-économique (taux, USD, matières premières)
+
+RÈGLES DE GESTION DU RISQUE (OBLIGATOIRES) :
+- confidence < 0.50 → action = "HOLD", position_size_pct = 0
+- confidence 0.50–0.65 → position_size_pct ≤ 2 %, ratio R/R ≥ 1:2
+- confidence 0.65–0.80 → position_size_pct ≤ 5 %, ratio R/R ≥ 1:2
+- confidence > 0.80 → position_size_pct ≤ 10 %, ratio R/R ≥ 1:2.5
+- take_profit_pct DOIT être ≥ 2 × stop_loss_pct
+
+Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après :
+{{"action": "<BUY | SELL | HOLD>", "confidence": <float 0.0–1.0>,
+  "position_size_pct": <float 0.0–10.0>, "stop_loss_pct": <float 0.5–15.0>,
+  "take_profit_pct": <float 1.0–30.0>, "time_horizon": "<24h | 48h | 1 semaine>",
+  "rationale": "<analyse détaillée en français 4–6 phrases, inclure données X si pertinentes>",
+  "key_risks": "<2–3 risques principaux, concis>",
+  "sources": [{{"title": "<titre>", "url": "<url>"}}]}}
+
+Inclure 3 à 6 sources réelles et récentes (< 48h). Posts X acceptés.
+"""
+
+
+def _do_autonomous_analysis(ticker: str, cfg: dict) -> dict:
+    """Run a single autonomous analysis using requests (sync). Returns decision dict."""
+    import requests as req
+    import json as _json
+    from datetime import datetime as _dt
+
+    ai_cfg = cfg.get("ai_analysis", {})
+    api_key = _read_env_key("OPENROUTER_API_KEY")
+    model = ai_cfg.get("model", "perplexity/sonar")
+    timeout = ai_cfg.get("timeout_seconds", 45)
+
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY non configurée")
+
+    prompt = _AUTONOMOUS_PROMPT.format(
+        ticker=ticker.upper(),
+        date=_dt.now().strftime("%Y-%m-%d %H:%M"),
+    )
+
+    r = req.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "HTTP-Referer": "https://tradeflow.local", "X-Title": "TradeFlow"},
+        json={"model": model, "messages": [{"role": "user", "content": prompt}], "response_format": {"type": "json_object"}},
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    data = _json.loads(r.json()["choices"][0]["message"]["content"])
+
+    action = data.get("action", "HOLD").upper()
+    if action not in ("BUY", "SELL", "HOLD"):
+        action = "HOLD"
+    confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
+    if confidence < 0.5:
+        action = "HOLD"
+    pos = max(0.0, min(10.0, float(data.get("position_size_pct", 0))))
+    sl = max(0.5, min(15.0, float(data.get("stop_loss_pct", 2.0))))
+    tp = max(1.0, min(30.0, float(data.get("take_profit_pct", 4.0))))
+    sources = data.get("sources", [])
+    if not isinstance(sources, list):
+        sources = []
+
+    from app.ai import score_store
+    score_store.set_decision(
+        ticker.upper(), action, confidence, pos, sl, tp,
+        data.get("time_horizon", "24h"),
+        data.get("rationale", ""),
+        data.get("key_risks", ""),
+        sources,
+    )
+    return score_store.get_decision(ticker.upper()) or {}
+
+
+@app.get("/api/ai/decisions")
+def get_all_ai_decisions():
+    """Return all cached autonomous AI decisions."""
+    from app.ai import score_store
+    cfg = _load_config()
+    ttl = cfg.get("ai_analysis", {}).get("score_ttl_seconds", 7200)
+    decisions = score_store.get_all_decisions(ttl=ttl)
+    return {"decisions": {k: {**v, "available": True, "symbol": k} for k, v in decisions.items()}}
+
+
+@app.get("/api/ai/decisions/{symbol}")
+def get_ai_decision(symbol: str):
+    """Return cached autonomous decision for a ticker."""
+    from app.ai import score_store
+    cfg = _load_config()
+    ttl = cfg.get("ai_analysis", {}).get("score_ttl_seconds", 7200)
+    d = score_store.get_decision(symbol.upper(), ttl=ttl)
+    if d is None:
+        return {"available": False, "symbol": symbol.upper()}
+    return {"available": True, "symbol": symbol.upper(), **d, "age_seconds": int(time.time() - d["ts"])}
+
+
+@app.post("/api/ai/decisions/{symbol}")
+def trigger_ai_decision(symbol: str):
+    """Trigger an immediate autonomous analysis for a ticker."""
+    try:
+        cfg = _load_config()
+        d = _do_autonomous_analysis(symbol.upper(), cfg)
+        return {"available": True, "symbol": symbol.upper(), **d, "age_seconds": 0}
+    except Exception as exc:
+        logger.error("Autonomous analysis failed for %s: %s", symbol, exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/ai/analyze-all")
+def ai_analyze_all():
+    """Trigger autonomous analysis for all configured tickers (background thread)."""
+    import threading
+    cfg = _load_config()
+    tickers = cfg.get("live_trading", {}).get("symbols") or cfg.get("default_symbols", [])
+
+    def _run():
+        for sym in tickers:
+            try:
+                _do_autonomous_analysis(sym, cfg)
+                logger.info("Autonomous analysis done: %s", sym)
+            except Exception as exc:
+                logger.warning("Autonomous analysis failed for %s: %s", sym, exc)
+
+    threading.Thread(target=_run, daemon=True, name="aria-analyze-all").start()
+    return {"success": True, "message": f"Analyse ARIA lancée pour {len(tickers)} ticker(s)", "tickers": tickers}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

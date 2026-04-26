@@ -38,3 +38,56 @@ def get_all_scores(ttl: int = 3600) -> dict[str, float]:
 def clear() -> None:
     with _lock:
         _store.clear()
+
+
+# ── Autonomous decision store ────────────────────────────────────────────────
+# ticker -> (action, confidence, position_size_pct, stop_loss_pct,
+#            take_profit_pct, time_horizon, rationale, key_risks, sources, ts)
+_decision_store: dict[str, tuple] = {}
+_decision_lock = Lock()
+
+
+def set_decision(
+    ticker: str, action: str, confidence: float,
+    position_size_pct: float, stop_loss_pct: float, take_profit_pct: float,
+    time_horizon: str, rationale: str, key_risks: str, sources: list,
+) -> None:
+    with _decision_lock:
+        _decision_store[ticker] = (
+            action, confidence, position_size_pct, stop_loss_pct,
+            take_profit_pct, time_horizon, rationale, key_risks, sources, time.time(),
+        )
+
+
+def get_decision(ticker: str, ttl: int = 7200) -> dict | None:
+    with _decision_lock:
+        entry = _decision_store.get(ticker)
+        if entry is None:
+            return None
+        action, confidence, pos, sl, tp, horizon, rationale, risks, sources, ts = entry
+        if (time.time() - ts) >= ttl:
+            return None
+        return {
+            "action": action, "confidence": confidence,
+            "position_size_pct": pos, "stop_loss_pct": sl,
+            "take_profit_pct": tp, "time_horizon": horizon,
+            "rationale": rationale, "key_risks": risks,
+            "sources": sources, "ts": ts,
+        }
+
+
+def get_all_decisions(ttl: int = 7200) -> dict[str, dict]:
+    now = time.time()
+    with _decision_lock:
+        result = {}
+        for ticker, entry in _decision_store.items():
+            action, confidence, pos, sl, tp, horizon, rationale, risks, sources, ts = entry
+            if (now - ts) < ttl:
+                result[ticker] = {
+                    "action": action, "confidence": confidence,
+                    "position_size_pct": pos, "stop_loss_pct": sl,
+                    "take_profit_pct": tp, "time_horizon": horizon,
+                    "rationale": rationale, "key_risks": risks,
+                    "sources": sources, "ts": ts,
+                }
+        return result
