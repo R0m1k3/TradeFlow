@@ -1074,6 +1074,15 @@ body {
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 // ═══════════════════════════════════════════════════════════════
+// MODULE-LEVEL NAVIGATION CACHE — survives component unmount/remount
+// ═══════════════════════════════════════════════════════════════
+const _homeCache = { markets: null, stocks: null, ts: 0 };
+const _detailCache = {};  // sym -> { detail, chartData, ts }
+const _chartCache  = {};  // `${sym}_${range}` -> { prices, ts }
+const HOME_CACHE_TTL   = 60000;   // 1 min — matches auto-refresh interval
+const DETAIL_CACHE_TTL = 300000;  // 5 min
+
+// ═══════════════════════════════════════════════════════════════
 // CONSTANTS — hex colors for SVG (CSS vars don't resolve in stopColor)
 // ═══════════════════════════════════════════════════════════════
 const COLOR_UP   = '#2FD66B';
@@ -1735,7 +1744,14 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
   const symbols = useMemo(() => (stocks || []).map(s => s.sym), [stocks]);
   const livePrices = useLivePrices(symbols);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (!force && _homeCache.stocks && (now - _homeCache.ts) < HOME_CACHE_TTL) {
+      setMarkets(_homeCache.markets);
+      setStocks(_homeCache.stocks);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -1743,6 +1759,9 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
         apiFetch('/api/markets'),
         apiFetch('/api/stocks?limit=200'),
       ]);
+      _homeCache.markets = m;
+      _homeCache.stocks = s.stocks;
+      _homeCache.ts = Date.now();
       setMarkets(m);
       setStocks(s.stocks);
     } catch (e) {
@@ -1753,7 +1772,7 @@ function HomeScreen({ onOpenStock, onOpenConfig, botActive, setBotActive }) {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
-  useEffect(() => { const t = setInterval(loadData, 60000); return () => clearInterval(t); }, [loadData]);
+  useEffect(() => { const t = setInterval(() => loadData(true), 60000); return () => clearInterval(t); }, [loadData]);
   useEffect(() => {
     if (!botActive) return;
     const t = setTimeout(loadData, 2000);
@@ -2008,6 +2027,13 @@ function DetailScreen({ stock, onBack }) {
   const sym = stock.sym || stock;
 
   useEffect(() => {
+    const cached = _detailCache[sym];
+    if (cached && (Date.now() - cached.ts) < DETAIL_CACHE_TTL) {
+      setDetail(cached.detail);
+      setChartData(cached.chartData);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     Promise.all([
@@ -2016,6 +2042,7 @@ function DetailScreen({ stock, onBack }) {
     ])
       .then(([d, h]) => {
         if (cancelled) return;
+        _detailCache[sym] = { detail: d, chartData: h.prices, ts: Date.now() };
         setDetail(d);
         setChartData(h.prices);
       })
@@ -2025,9 +2052,21 @@ function DetailScreen({ stock, onBack }) {
   }, [sym]);
 
   useEffect(() => {
+    if (range === '1M') return;
+    const cacheKey = `${sym}_${range}`;
+    const cached = _chartCache[cacheKey];
+    if (cached && (Date.now() - cached.ts) < DETAIL_CACHE_TTL) {
+      setChartData(cached.prices);
+      return;
+    }
     let cancelled = false;
     apiFetch(`/api/stocks/${encodeURIComponent(sym)}/history?range=${range}`)
-      .then(h => { if (!cancelled) setChartData(h.prices); })
+      .then(h => {
+        if (!cancelled) {
+          _chartCache[cacheKey] = { prices: h.prices, ts: Date.now() };
+          setChartData(h.prices);
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [sym, range]);

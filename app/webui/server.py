@@ -106,18 +106,21 @@ def _save_settings(settings: dict) -> None:
 
 
 def _read_env_key(name: str) -> str:
-    """Read a key from settings.json first, then .env, then environment variables."""
-    # 1. Persistent settings file (works in Docker with volume mount)
+    """Read a key: settings.json → env var (docker-compose) → .env file."""
+    # 1. UI-configured, persisted in volume (survives restarts, lost only on volume wipe)
     val = _load_settings().get(name, "")
     if val:
         return val
-    # 2. .env file (local dev)
+    # 2. docker-compose environment / host env var (survives volume wipes)
+    val = os.environ.get(name, "")
+    if val:
+        return val
+    # 3. .env file (local dev convenience)
     if ENV_FILE.exists():
         for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
             if line.startswith(f"{name}="):
                 return line.split("=", 1)[1].strip()
-    # 3. Environment variable (docker-compose environment section)
-    return os.environ.get(name, "")
+    return ""
 
 
 def _write_env_key(name: str, value: str) -> None:
@@ -880,9 +883,11 @@ def get_ai_score(symbol: str):
 
 @app.post("/api/ai/score/{symbol}")
 def trigger_ai_score(symbol: str):
-    """Trigger an immediate on-demand AI analysis for a ticker."""
-    import asyncio
-    import threading
+    """Trigger an immediate on-demand AI analysis for a ticker (sync, uses requests)."""
+    import requests as req
+    import json as _json
+    from datetime import datetime as _dt
+
     cfg = _load_config()
     ai_cfg = cfg.get("ai_analysis", {})
     api_key = _read_env_key("OPENROUTER_API_KEY")
@@ -892,32 +897,58 @@ def trigger_ai_score(symbol: str):
     if not api_key:
         raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY non configurée")
 
+    ticker = symbol.upper()
+    prompt = (
+        f"Ticker boursier : {ticker}\n"
+        f"Date et heure : {_dt.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        "Analyse le comportement probable de cette action sur les prochaines 24-48 heures "
+        "en te basant sur les dernières actualités, la tendance du secteur, et le sentiment du marché.\n\n"
+        "Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après :\n"
+        '{"score": <float 0.0-1.0>, "rationale": "<analyse concise en français, 2-3 phrases>", '
+        '"sources": [{"title": "<titre>", "url": "<url complète>"}, ...]}\n\n'
+        "0.0 = fort signal de vente, 0.5 = neutre, 1.0 = fort signal d'achat. "
+        "Inclure 2 à 4 sources réelles et vérifiables."
+    )
     try:
-        from app.ai.openrouter_client import fetch_ai_score
-        from app.ai import score_store
+        r = req.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://tradeflow.local",
+                "X-Title": "TradeFlow",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"},
+            },
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        data = _json.loads(content)
+        score = max(0.0, min(1.0, float(data.get("score", 0.5))))
+        rationale = data.get("rationale", "")
+        sources = data.get("sources", [])
+        if not isinstance(sources, list):
+            sources = []
 
-        async def _run():
-            score, rationale, sources = await fetch_ai_score(symbol.upper(), model, api_key, timeout)
-            score_store.set_score(symbol.upper(), score, rationale, sources)
-            return score, rationale, sources
-
-        # Run async in a new event loop (we're in a sync FastAPI handler)
-        loop = asyncio.new_event_loop()
         try:
-            score, rationale, sources = loop.run_until_complete(_run())
-        finally:
-            loop.close()
+            from app.ai import score_store
+            score_store.set_score(ticker, score, rationale, sources)
+        except Exception:
+            pass
 
         return {
-            "success": True,
-            "symbol": symbol.upper(),
-            "score": score,
-            "rationale": rationale,
-            "sources": sources,
-            "ts": time.time(),
+            "success": True, "available": True,
+            "symbol": ticker, "score": score,
+            "rationale": rationale, "sources": sources,
+            "ts": time.time(), "age_seconds": 0,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.error("On-demand AI analysis failed for %s: %s", symbol, exc)
+        logger.error("On-demand AI analysis failed for %s: %s", ticker, exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

@@ -35,10 +35,14 @@ Date et heure : {date}
 Analyse le comportement probable de cette action sur les prochaines 24-48 heures en te basant \
 sur les dernières actualités, la tendance du secteur, et le sentiment du marché.
 
+Consulte également les publications récentes sur X (Twitter/𝕏) concernant ${ticker} : \
+posts d'analystes, dirigeants, investisseurs institutionnels et sentiment retail en temps réel. \
+Ces données sociales complètent les actualités financières traditionnelles.
+
 Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après :
 {{
   "score": <float entre 0.0 et 1.0>,
-  "rationale": "<analyse concise en français, 2-3 phrases>",
+  "rationale": "<analyse concise en français, 2-3 phrases incluant le sentiment X si pertinent>",
   "sources": [
     {{"title": "<titre de la source>", "url": "<url complète>"}},
     ...
@@ -46,7 +50,8 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après :
 }}
 
 0.0 = fort signal de vente, 0.5 = neutre, 1.0 = fort signal d'achat.
-Inclure 2 à 4 sources réelles et vérifiables utilisées pour l'analyse.
+Inclure 2 à 5 sources réelles et vérifiables (articles financiers, posts X, communiqués), \
+avec URLs directes quand disponibles.
 """
 
 

@@ -29,7 +29,7 @@ def _load_config() -> dict:
 
 def _get_api_key() -> str:
     import json as _json
-    # 1. data/settings.json (Docker-safe persistent storage)
+    # 1. data/settings.json (UI-configured, in Docker volume)
     if SETTINGS_PATH.exists():
         try:
             val = _json.loads(SETTINGS_PATH.read_text()).get("OPENROUTER_API_KEY", "")
@@ -37,15 +37,18 @@ def _get_api_key() -> str:
                 return val
         except Exception:
             pass
-    # 2. .env file (local dev)
+    # 2. docker-compose environment / host env var (survives volume wipes)
+    val = os.environ.get("OPENROUTER_API_KEY", "")
+    if val:
+        return val
+    # 3. .env file (local dev)
     if ENV_PATH.exists():
         for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
             if line.startswith("OPENROUTER_API_KEY="):
                 key = line.split("=", 1)[1].strip()
                 if key:
                     return key
-    # 3. Environment variable
-    return os.environ.get("OPENROUTER_API_KEY", "")
+    return ""
 
 
 def _any_market_open() -> bool:
