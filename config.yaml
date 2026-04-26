@@ -39,6 +39,16 @@ indicators:
   bollinger_window: 20
   bollinger_std: 2
 
+# ── AI Analysis (OpenRouter) ───────────────────────────────────────────────────
+# API key is stored in .env as OPENROUTER_API_KEY (never here)
+ai_analysis:
+  enabled: false
+  model: "perplexity/sonar"
+  interval_seconds: 1800        # 30 minutes
+  score_weight: 0.3             # 0 = ignore AI, 1 = AI only
+  timeout_seconds: 30
+  score_ttl_seconds: 3600       # score expires after 1h if scheduler stops
+
 # ── Live Trading Bot ───────────────────────────────────────────────────────────
 # Configure the continuous bot here. Start/stop from the WebUI.
 live_trading:

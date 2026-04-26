@@ -8,6 +8,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+import asyncio
 import json
 import logging
 import signal
@@ -18,8 +19,12 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import yaml
 from streamlit_autorefresh import st_autorefresh
 
+from app.ai import scheduler as ai_scheduler
+from app.ai import score_store
+from app.ai.openrouter_client import fetch_models, test_connection
 from app.analysis.composite import compute_composite_score
 from app.bot.live_trader import create_live_session, get_active_live_session, stop_live_session
 from app.data.fetcher import fetch_ohlcv
@@ -54,6 +59,44 @@ st.markdown("<style>#MainMenu,footer,header{visibility:hidden;}</style>", unsafe
 st_autorefresh(interval=60000, key="stream_refresh")
 
 init_database()
+
+# ── Config helpers ─────────────────────────────────────────────────────────────
+
+_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
+_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+
+
+def _load_config() -> dict:
+    with open(_CONFIG_PATH, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _save_config(cfg: dict) -> None:
+    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        yaml.dump(cfg, f, allow_unicode=True)
+
+
+def _read_env_key(name: str) -> str:
+    if not _ENV_PATH.exists():
+        return ""
+    for line in _ENV_PATH.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{name}="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_fetch_models(api_key: str) -> list[str]:
+    return fetch_models(api_key=api_key)
+
+
+def _write_env_key(name: str, value: str) -> None:
+    lines = _ENV_PATH.read_text(encoding="utf-8").splitlines() if _ENV_PATH.exists() else []
+    lines = [l for l in lines if not l.startswith(f"{name}=")]
+    if value:
+        lines.append(f"{name}={value}")
+    _ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 
 # ── Bot process management ───────────────────────────────────────────────────────
 # The bot runs as a separate subprocess. We track it via a PID file.
@@ -131,15 +174,20 @@ if BOT_PID_FILE.exists():
 ALL_TICKERS = get_all_tickers()
 TICKER_DISPLAY = {sym: get_display_name(sym) for sym in ALL_TICKERS}
 
+# Start AI scheduler once tickers are known
+_ai_cfg = _load_config().get("ai_analysis", {})
+if _ai_cfg.get("enabled", False) and _read_env_key("OPENROUTER_API_KEY"):
+    ai_scheduler.start(ALL_TICKERS)
+
 
 # ── Stock table builder ──────────────────────────────────────────────────────────
 
 def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> str:
-    """Generate a self-contained HTML table of stock data.
+    """Generate a self-contained HTML table of stock data."""
+    ai_cfg = _load_config().get("ai_analysis", {})
+    show_ai = ai_cfg.get("enabled", False)
+    ai_ttl = ai_cfg.get("score_ttl_seconds", 3600)
 
-    Each row: Symbol, Company Name, Price, Change %, Score (0-1), Signal.
-    Uses the same color scheme as the rest of the dashboard.
-    """
     rows_html = ""
     for sym in symbols:
         try:
@@ -153,7 +201,6 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
             score = score_data.combined
             price = float(df.iloc[-1]["close"])
 
-            # Price change: compare last close to previous close
             if len(df) >= 2:
                 prev_close = float(df.iloc[-2]["close"])
                 change_pct = ((price - prev_close) / prev_close) * 100
@@ -164,7 +211,6 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
             currency = get_currency(sym)
             price_str = format_price(price, currency)
 
-            # Direction arrow and color
             if change_pct > 0:
                 arrow = "&#9650;"
                 change_color = "#00C896"
@@ -175,19 +221,26 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
                 arrow = "&#9646;"
                 change_color = "#8B949E"
 
-            change_str = f"{change_pct:+.2f}%"
-
-            # Score and signal badge
             badge_cls = signal_badge_class(score)
             badge_label = signal_label(score)
+
+            # AI score column
+            ai_cell = ""
+            if show_ai:
+                ai_score = score_store.get_score(sym, ttl=ai_ttl)
+                if ai_score is not None:
+                    ai_cell = f'<td class="tf-td-score" style="color:{score_color(ai_score)};">{ai_score:.2f}</td>'
+                else:
+                    ai_cell = '<td class="tf-td-score" style="color:#8B949E;">—</td>'
 
             rows_html += (
                 f'<tr>'
                 f'<td class="tf-td-sym">{sym}</td>'
                 f'<td class="tf-td-name">{display_name}</td>'
                 f'<td class="tf-td-price">{price_str}</td>'
-                f'<td class="tf-td-change" style="color:{change_color};">{arrow} {change_str}</td>'
+                f'<td class="tf-td-change" style="color:{change_color};">{arrow} {change_pct:+.2f}%</td>'
                 f'<td class="tf-td-score" style="color:{score_color(score)};">{score:.2f}</td>'
+                f'{ai_cell}'
                 f'<td class="tf-td-signal"><span class="tf-badge {badge_cls}">{badge_label}</span></td>'
                 f'</tr>'
             )
@@ -197,6 +250,7 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
     if not rows_html:
         return '<div class="tf-empty">Aucune donnee disponible</div>'
 
+    ai_header = '<th>Score IA</th>' if show_ai else ''
     return (
         f'<div class="tf-table-wrapper">'
         f'<table class="tf-stock-table">'
@@ -207,6 +261,7 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
         f'<th>Prix</th>'
         f'<th>Variation</th>'
         f'<th>Score</th>'
+        f'{ai_header}'
         f'<th>Signal</th>'
         f'</tr>'
         f'</thead>'
@@ -352,37 +407,128 @@ st.markdown(
 # ── Config modal (opened by gear icon) ─────────────────────────────────────────
 
 if gear_clicked:
-    @st.dialog("Configuration", width="small")
+    @st.dialog("Configuration", width="large")
     def config_modal():
-        st.markdown("### Parametres du bot")
-        active_in_dialog = get_active_live_session()
+        tab_bot, tab_ai = st.tabs(["🤖 Bot de trading", "🧠 Analyse IA"])
 
-        c1, c2 = st.columns(2)
-        with c1:
-            capital = st.number_input("Capital de depart (€)", min_value=500, max_value=10_000_000,
-                                       value=10_000, step=500, key="dlg_capital")
-        with c2:
-            interval = st.selectbox("Frequence d'analyse", ["1h", "15m", "1d"],
-                                     format_func=lambda x: {"1h": "Toutes les heures", "15m": "Tous les 15 min", "1d": "Une fois par jour"}.get(x, x),
-                                     key="dlg_interval")
+        # ── Tab Bot ────────────────────────────────────────────────────────────
+        with tab_bot:
+            st.markdown("### Parametres du bot")
+            active_in_dialog = get_active_live_session()
 
-        st.info(f"Le bot analysera les **{len(ALL_TICKERS)} actions** disponibles (NASDAQ + Europe).")
-        st.markdown(f"<div style='color:#8B949E;font-size:0.8rem;'>{len(ALL_TICKERS)} tickers : {', '.join(ALL_TICKERS[:12])}...</div>", unsafe_allow_html=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                capital = st.number_input("Capital de depart (€)", min_value=500, max_value=10_000_000,
+                                           value=10_000, step=500, key="dlg_capital")
+            with c2:
+                interval = st.selectbox("Frequence d'analyse", ["1h", "15m", "1d"],
+                                         format_func=lambda x: {"1h": "Toutes les heures", "15m": "Tous les 15 min", "1d": "Une fois par jour"}.get(x, x),
+                                         key="dlg_interval")
 
-        c_start, c_stop = st.columns(2)
-        with c_start:
-            if st.button("▶ Demarrer le bot", use_container_width=True, type="primary",
-                         disabled=(active_in_dialog is not None), key="dlg_start"):
-                run_id = create_live_session("composite", ALL_TICKERS, interval, capital)
-                _start_bot_process()
-                st.success(f"Session #{run_id} lancee avec {len(ALL_TICKERS)} actions !")
-                st.rerun()
-        with c_stop:
-            if st.button("■ Arreter le bot", use_container_width=True,
-                         disabled=(active_in_dialog is None), key="dlg_stop"):
-                _stop_bot_process()
-                stop_live_session()
-                st.rerun()
+            st.info(f"Le bot analysera les **{len(ALL_TICKERS)} actions** disponibles (NASDAQ + Europe).")
+            st.markdown(f"<div style='color:#8B949E;font-size:0.8rem;'>{len(ALL_TICKERS)} tickers : {', '.join(ALL_TICKERS[:12])}...</div>", unsafe_allow_html=True)
+
+            c_start, c_stop = st.columns(2)
+            with c_start:
+                if st.button("▶ Demarrer le bot", use_container_width=True, type="primary",
+                             disabled=(active_in_dialog is not None), key="dlg_start"):
+                    run_id = create_live_session("composite", ALL_TICKERS, interval, capital)
+                    _start_bot_process()
+                    st.success(f"Session #{run_id} lancee avec {len(ALL_TICKERS)} actions !")
+                    st.rerun()
+            with c_stop:
+                if st.button("■ Arreter le bot", use_container_width=True,
+                             disabled=(active_in_dialog is None), key="dlg_stop"):
+                    _stop_bot_process()
+                    stop_live_session()
+                    st.rerun()
+
+        # ── Tab IA ─────────────────────────────────────────────────────────────
+        with tab_ai:
+            st.markdown("### Analyse IA via OpenRouter")
+            st.markdown(
+                "<div style='color:#8B949E;font-size:0.85rem;margin-bottom:1rem;'>"
+                "Un modele IA analysera chaque action toutes les 30 minutes et attribuera "
+                "un score 0-1 pour affiner les decisions du bot."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            cfg = _load_config()
+            ai_cfg = cfg.setdefault("ai_analysis", {})
+
+            # Current saved key (masked display)
+            saved_key = _read_env_key("OPENROUTER_API_KEY")
+            key_hint = f"Cle actuelle : {saved_key[:8]}••••" if saved_key else "Aucune cle configuree"
+            st.caption(key_hint)
+
+            new_key = st.text_input(
+                "Cle API OpenRouter",
+                value="",
+                type="password",
+                placeholder="sk-or-v1-...",
+                key="dlg_or_key",
+                help="Votre cle API sur openrouter.ai — jamais stockee en clair dans le code",
+            )
+
+            current_model = ai_cfg.get("model", "perplexity/sonar")
+            with st.spinner("Chargement des modeles OpenRouter..."):
+                available_models = _cached_fetch_models(api_key=saved_key or new_key)
+            if not available_models:
+                st.warning("Impossible de recuperer la liste des modeles. Verifiez votre connexion ou entrez votre cle API.")
+                available_models = [current_model] if current_model else ["perplexity/sonar"]
+            model_idx = available_models.index(current_model) if current_model in available_models else 0
+            selected_model = st.selectbox(
+                f"Modele IA ({len(available_models)} disponibles)",
+                available_models,
+                index=model_idx,
+                key="dlg_or_model",
+                help="perplexity/sonar(-pro) recommande : acces web natif pour les actualites en temps reel",
+            )
+
+            ai_enabled = st.toggle(
+                "Activer l'analyse IA",
+                value=ai_cfg.get("enabled", False),
+                key="dlg_ai_enabled",
+            )
+
+            score_weight = st.slider(
+                "Poids du score IA dans la decision",
+                min_value=0.0, max_value=1.0,
+                value=float(ai_cfg.get("score_weight", 0.3)),
+                step=0.05,
+                key="dlg_score_weight",
+                help="0 = l'IA n'influence pas le bot | 1 = decision basee uniquement sur l'IA",
+            )
+
+            col_save, col_test = st.columns(2)
+
+            with col_save:
+                if st.button("💾 Sauvegarder", use_container_width=True, type="primary", key="dlg_ai_save"):
+                    if new_key:
+                        _write_env_key("OPENROUTER_API_KEY", new_key)
+                    ai_cfg["model"] = selected_model
+                    ai_cfg["enabled"] = ai_enabled
+                    ai_cfg["score_weight"] = score_weight
+                    _save_config(cfg)
+                    if ai_enabled and (new_key or saved_key):
+                        ai_scheduler.start(ALL_TICKERS)
+                    elif not ai_enabled:
+                        ai_scheduler.stop()
+                    st.success("Configuration IA sauvegardee !")
+
+            with col_test:
+                if st.button("🔌 Tester la connexion", use_container_width=True, key="dlg_ai_test"):
+                    key_to_test = new_key or saved_key
+                    if not key_to_test:
+                        st.error("Entrez d'abord une cle API.")
+                    else:
+                        with st.spinner("Connexion a OpenRouter..."):
+                            ok = asyncio.run(test_connection(key_to_test, selected_model))
+                        if ok:
+                            st.success(f"Connexion reussie — modele : {selected_model}")
+                        else:
+                            st.error("Echec — verifiez votre cle sur openrouter.ai")
 
     config_modal()
 
