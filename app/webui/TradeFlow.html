@@ -1313,8 +1313,9 @@ function DashboardCharts() {
 
   if (!data) return null;
 
-  const { capital, indices } = data;
+  const { capital, aria_capital, indices } = data;
   const hasCapital = capital?.values?.length > 1;
+  const hasAria = aria_capital?.values?.length > 1;
 
   // Build 5 day labels from Mon to Fri
   const DAY_NAMES = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
@@ -1329,6 +1330,7 @@ function DashboardCharts() {
   })();
 
   const capColor = hasCapital && capital.change_pct >= 0 ? COLOR_UP : COLOR_DOWN;
+  const ARIA_COLOR = '#60a5fa';
 
   return (
     <div className="dash-charts" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
@@ -1341,36 +1343,66 @@ function DashboardCharts() {
         padding: '20px 24px',
         boxShadow: 'var(--shadow-md)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-3)', marginBottom: 4 }}>Capital — 7 jours</div>
-            {hasCapital
-              ? <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'Inter Tight, sans-serif', color: 'var(--fg)' }}>
-                  {fmt(capital.values[capital.values.length - 1], 0)} €
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--fg-3)', marginBottom: 10 }}>Capital — 7 jours</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 20 }}>
+              {/* Algo */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: capColor, display: 'inline-block' }} />
+                  <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Algorithme</span>
                 </div>
-              : <div style={{ fontSize: 14, color: 'var(--fg-3)' }}>Bot non démarré</div>
-            }
-          </div>
-          {hasCapital && (
-            <div style={{
-              fontSize: 13, fontWeight: 600, color: capColor,
-              background: capital.change_pct >= 0 ? 'var(--up-soft)' : 'var(--down-soft)',
-              padding: '4px 10px', borderRadius: 20,
-            }}>
-              {capital.change_pct >= 0 ? '+' : ''}{capital.change_pct}%
+                {hasCapital
+                  ? <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'Inter Tight, sans-serif', color: 'var(--fg)' }}>
+                      {fmt(capital.values[capital.values.length - 1], 0)} €
+                    </div>
+                  : <div style={{ fontSize: 13, color: 'var(--fg-4)' }}>—</div>
+                }
+              </div>
+              {/* ARIA */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: ARIA_COLOR, display: 'inline-block' }} />
+                  <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>ARIA</span>
+                </div>
+                {hasAria
+                  ? <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'Inter Tight, sans-serif', color: ARIA_COLOR }}>
+                      {fmt(aria_capital.values[aria_capital.values.length - 1], 0)} €
+                    </div>
+                  : <div style={{ fontSize: 13, color: 'var(--fg-4)' }}>—</div>
+                }
+              </div>
             </div>
-          )}
+            {/* Badges */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              {hasCapital && (
+                <div style={{ fontSize: 12, fontWeight: 600, color: capColor, background: capital.change_pct >= 0 ? 'var(--up-soft)' : 'var(--down-soft)', padding: '3px 9px', borderRadius: 20 }}>
+                  {capital.change_pct >= 0 ? '+' : ''}{capital.change_pct}%
+                </div>
+              )}
+              {hasAria && (
+                <div style={{ fontSize: 12, fontWeight: 600, color: ARIA_COLOR, background: 'rgba(96,165,250,0.12)', padding: '3px 9px', borderRadius: 20 }}>
+                  {aria_capital.change_pct >= 0 ? '+' : ''}{aria_capital.change_pct}%
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-        {hasCapital
+        {(hasCapital || hasAria)
           ? <LineChart
-              series={[{ data: capital.values, color: capColor }]}
+              series={[
+                hasCapital && { data: capital.values, color: capColor },
+                hasAria    && { data: aria_capital.values, color: ARIA_COLOR },
+              ].filter(Boolean)}
               height={130}
+              fill={!hasAria}
               yLabel={v => `${fmt(v, 0)}€`}
               xLabels={xLabels}
             />
           : <div style={{ height: 130, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-4)', gap: 6 }}>
               <Icon name="chart" size={28} />
-              <div style={{ fontSize: 12 }}>Démarrez le bot pour voir l'évolution</div>
+              <div style={{ fontSize: 12 }}>Démarrez le bot ou ARIA pour voir l'évolution</div>
             </div>
         }
       </div>
@@ -2219,6 +2251,8 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
   const [error, setError] = useState(null);
 
   // AI state
+  const [algoCapital, setAlgoCapital] = useState(10000);
+  const [ariaCapital, setAriaCapital] = useState(10000);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiMode, setAiMode] = useState('hybrid');
   const [aiModel, setAiModel] = useState('perplexity/sonar');
@@ -2234,6 +2268,8 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
     apiFetch('/api/config')
       .then(cfg => {
         setCapital(cfg.capital || 10000);
+        setAlgoCapital(cfg.algo_capital || cfg.capital || 10000);
+        setAriaCapital(cfg.aria_capital || 10000);
         setRisk(cfg.risk || 2);
         setMaxPos(cfg.max_positions || 5);
         setStrategy(cfg.strategy_label || 'Équilibrée');
@@ -2285,7 +2321,8 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
       await apiFetch('/api/config', {
         method: 'POST',
         body: JSON.stringify({
-          capital, strategy, max_positions: maxPos, min_score: minScore,
+          capital: algoCapital, algo_capital: algoCapital, aria_capital: ariaCapital,
+          strategy, max_positions: maxPos, min_score: minScore,
           auto_buy: autoBuy, auto_sell: autoSell, notifications,
           ai_enabled: aiEnabled, ai_mode: aiMode, ai_model: aiModel, ai_score_weight: aiWeight,
           ai_key: aiKey || undefined,
@@ -2368,16 +2405,22 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
       <div className="config-grid">
         <div className="config-card">
           <h3>Capital & risque</h3>
-          <div className="sub">Définit la taille des positions prises par le bot.</div>
-          <div className="field">
-            <div>
-              <div className="field-label">Capital alloué</div>
-              <div className="field-hint">Montant maximum engagé</div>
-            </div>
-            <div className="slider-row" style={{ width: 200 }}>
-              <input type="range" min="1000" max="100000" step="500" value={capital} onChange={e => setCapital(+e.target.value)} />
-              <span className="val tnum">${fmt(capital, 0)}</span>
-            </div>
+          <div className="sub">Deux enveloppes séparées — l'une pour l'algorithme, l'autre pour ARIA.</div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 4 }}>
+            {[
+              { label: 'Capital Algorithme', hint: 'Géré par le bot traditionnel', val: algoCapital, set: setAlgoCapital, color: '#5AFF8C' },
+              { label: 'Capital ARIA', hint: 'Géré par l\'agent IA autonome', val: ariaCapital, set: setAriaCapital, color: '#60a5fa' },
+            ].map(c => (
+              <div key={c.label} style={{ padding: '14px', background: 'var(--bg-tint)', borderRadius: 12, border: `1.5px solid ${c.val > 0 ? c.color + '33' : 'var(--hairline)'}` }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: c.color, marginBottom: 4 }}>{c.label}</div>
+                <div style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 10 }}>{c.hint}</div>
+                <div className="slider-row" style={{ width: '100%' }}>
+                  <input type="range" min="1000" max="100000" step="500" value={c.val} onChange={e => c.set(+e.target.value)} style={{ flex: 1 }} />
+                  <span className="val tnum" style={{ minWidth: 64 }}>${fmt(c.val, 0)}</span>
+                </div>
+              </div>
+            ))}
           </div>
           <div className="field">
             <div>
@@ -2721,7 +2764,154 @@ function AgentTickerCard({ sym, decision: d, onAnalyze, analyzing }) {
   );
 }
 
+// ── Comparison view ───────────────────────────────────────────────────────────
+
+function ComparisonView() {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [resetting, setResetting] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    apiFetch('/api/comparison')
+      .then(d => setData(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const handleReset = async () => {
+    if (!confirm('Remettre le portfolio ARIA à zéro ? Toutes les positions et l\'historique seront perdus.')) return;
+    setResetting(true);
+    try {
+      await apiFetch('/api/aria/reset', { method: 'POST' });
+      await load();
+    } catch (e) { alert('Erreur : ' + e.message); }
+    setResetting(false);
+  };
+
+  if (loading) return (
+    <div style={{ padding: '40px 0' }}>
+      {[1, 2].map(i => <div key={i} className="shimmer" style={{ height: 120, borderRadius: 14, marginBottom: 14 }} />)}
+    </div>
+  );
+
+  const algo = data?.algo || {};
+  const aria = data?.aria || {};
+
+  // Normalize snapshots to % gain from start for chart comparison
+  const buildSeries = (snapshots, initialCapital) => {
+    if (!snapshots || snapshots.length === 0) return [];
+    return snapshots.map(s => ((s.value - initialCapital) / initialCapital) * 100);
+  };
+
+  const algoSeries = buildSeries(algo.snapshots, algo.initial_capital);
+  const ariaSeries = buildSeries(aria.snapshots, aria.initial_capital);
+  const maxLen = Math.max(algoSeries.length, ariaSeries.length);
+
+  const StatCard = ({ label, algoVal, ariaVal, fmt: fmtFn = v => v, better = 'high' }) => {
+    const aBetter = better === 'high' ? algoVal >= ariaVal : algoVal <= ariaVal;
+    const rBetter = better === 'high' ? ariaVal >= algoVal : ariaVal <= algoVal;
+    return (
+      <div style={{ background: 'var(--bg-tint)', borderRadius: 12, padding: '14px 16px' }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 10, color: '#5AFF8C', marginBottom: 2 }}>Algorithme</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: aBetter ? 'var(--fg)' : 'var(--fg-3)', fontVariantNumeric: 'tabular-nums' }}>{fmtFn(algoVal)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: '#60a5fa', marginBottom: 2 }}>ARIA</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: rBetter ? 'var(--fg)' : 'var(--fg-3)', fontVariantNumeric: 'tabular-nums' }}>{fmtFn(ariaVal)}</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const winner = aria.pnl_pct > algo.pnl_pct ? 'ARIA' : algo.pnl_pct > aria.pnl_pct ? 'Algorithme' : null;
+
+  return (
+    <div>
+      {winner && (
+        <div style={{ marginBottom: 20, padding: '12px 18px', borderRadius: 14,
+          background: winner === 'ARIA' ? 'rgba(96,165,250,0.1)' : 'rgba(90,255,140,0.1)',
+          border: `1.5px solid ${winner === 'ARIA' ? '#60a5fa44' : '#5AFF8C44'}`,
+          display: 'flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
+          <span style={{ fontSize: 20 }}>🏆</span>
+          <span><strong style={{ color: winner === 'ARIA' ? '#60a5fa' : '#5AFF8C' }}>{winner}</strong> est actuellement le plus rentable</span>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginBottom: 24 }}>
+        <StatCard label="Valeur actuelle" algoVal={algo.current_value} ariaVal={aria.current_value}
+          fmtFn={v => `$${(v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`} />
+        <StatCard label="P&L" algoVal={algo.pnl || 0} ariaVal={aria.pnl || 0}
+          fmtFn={v => `${v >= 0 ? '+' : ''}$${Math.abs(v || 0).toFixed(0)}`} />
+        <StatCard label="Rendement %" algoVal={algo.pnl_pct || 0} ariaVal={aria.pnl_pct || 0}
+          fmtFn={v => `${v >= 0 ? '+' : ''}${(v || 0).toFixed(2)}%`} />
+        <StatCard label="Trades" algoVal={algo.total_trades || 0} ariaVal={aria.total_trades || 0}
+          fmtFn={v => String(v || 0)} better="low" />
+        <StatCard label="Win rate" algoVal={algo.win_rate || 0} ariaVal={aria.win_rate || 0}
+          fmtFn={v => `${((v || 0) * 100).toFixed(0)}%`} />
+        <StatCard label="Positions ouvertes" algoVal={0} ariaVal={aria.open_positions || 0}
+          fmtFn={v => String(v || 0)} better="low" />
+      </div>
+
+      {maxLen > 1 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>Évolution comparée (% gain/perte)</div>
+            <div style={{ display: 'flex', gap: 14, fontSize: 12 }}>
+              {algoSeries.length > 0 && <span><span style={{ display: 'inline-block', width: 12, height: 3, background: '#5AFF8C', borderRadius: 2, marginRight: 5, verticalAlign: 'middle' }} />Algorithme</span>}
+              {ariaSeries.length > 0 && <span><span style={{ display: 'inline-block', width: 12, height: 3, background: '#60a5fa', borderRadius: 2, marginRight: 5, verticalAlign: 'middle' }} />ARIA</span>}
+            </div>
+          </div>
+          <LineChart
+            series={[
+              algoSeries.length > 0 && { data: algoSeries, color: '#5AFF8C' },
+              ariaSeries.length > 0 && { data: ariaSeries, color: '#60a5fa' },
+            ].filter(Boolean)}
+            height={180}
+            yLabel={v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`}
+          />
+        </div>
+      )}
+
+      {(algo.recent_trades?.length > 0 || aria.recent_trades?.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+          {[{ label: 'Algorithme', trades: algo.recent_trades, color: '#5AFF8C' },
+            { label: 'ARIA', trades: aria.recent_trades, color: '#60a5fa' }].map(agent => (
+            <div key={agent.label} className="card">
+              <div style={{ fontWeight: 600, fontSize: 13, color: agent.color, marginBottom: 12 }}>Trades récents — {agent.label}</div>
+              {(agent.trades || []).slice(0, 8).map((t, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--hairline)', fontSize: 12 }}>
+                  <span style={{ fontWeight: 600 }}>{t.symbol || t.sym}</span>
+                  <span style={{ color: t.side === 'BUY' || t.action === 'BUY' ? 'var(--up)' : 'var(--down)' }}>{t.side || t.action}</span>
+                  <span style={{ color: (t.pnl || 0) >= 0 ? 'var(--up)' : 'var(--down)', fontVariantNumeric: 'tabular-nums' }}>
+                    {t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(0)}` : '—'}
+                  </span>
+                </div>
+              ))}
+              {!agent.trades?.length && <div style={{ color: 'var(--fg-4)', fontSize: 12, padding: '12px 0' }}>Aucun trade encore</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ textAlign: 'right' }}>
+        <button className="btn" onClick={handleReset} disabled={resetting} style={{ fontSize: 12, color: 'var(--down)' }}>
+          {resetting ? 'Réinitialisation...' : '⚠ Réinitialiser portfolio ARIA'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── AIAgentScreen ─────────────────────────────────────────────────────────────
+
 function AIAgentScreen({ onBack }) {
+  const [tab, setTab] = React.useState('decisions');
   const [decisions, setDecisions] = React.useState({});
   const [tickers, setTickers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -2731,8 +2921,8 @@ function AIAgentScreen({ onBack }) {
 
   const loadAll = React.useCallback(async () => {
     try {
-      const [cfg, dec] = await Promise.all([apiFetch('/api/config'), apiFetch('/api/ai/decisions')]);
-      setTickers(cfg.symbols || []);
+      const [tkr, dec] = await Promise.all([apiFetch('/api/tickers'), apiFetch('/api/ai/decisions')]);
+      setTickers((tkr.tickers || []).map(t => t.sym));
       setDecisions(dec.decisions || {});
     } catch (e) {}
   }, []);
@@ -2774,42 +2964,64 @@ function AIAgentScreen({ onBack }) {
     <>
       <div className="back-btn" onClick={onBack}><Icon name="arrow-left" size={16} /> Retour aux marchés</div>
 
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, fontFamily: 'Inter Tight, sans-serif' }}>Agent IA Autonome</h1>
           <span style={{ background: 'var(--accent-soft)', color: 'var(--accent)', padding: '4px 13px', borderRadius: 20, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em' }}>ARIA</span>
         </div>
-        <p style={{ color: 'var(--fg-3)', fontSize: 14, margin: '0 0 18px', lineHeight: 1.5 }}>
-          ARIA analyse chaque ticker en temps réel — actualités, X/𝕏, indicateurs techniques, données fondamentales —
-          et prend ses propres décisions de trading avec gestion du risque intégrée.
+        <p style={{ color: 'var(--fg-3)', fontSize: 14, margin: 0, lineHeight: 1.5 }}>
+          ARIA analyse chaque ticker — actualités, X/𝕏, indicateurs techniques — et prend ses propres décisions avec gestion du risque intégrée.
         </p>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn accent" onClick={analyzeAll} disabled={analyzingAll} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {analyzingAll
-              ? <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />Analyse en cours…</>
-              : '⚡ Analyser tous les tickers'}
-          </button>
-          <button className="btn" onClick={loadAll} style={{ fontSize: 13 }}>Actualiser</button>
-          {statusMsg && <span style={{ fontSize: 13, color: 'var(--fg-3)' }}>{statusMsg}</span>}
-        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 16, marginBottom: 40 }}>
-        {tickers.map(sym => (
-          <AgentTickerCard
-            key={sym}
-            sym={sym}
-            decision={decisions[sym]}
-            onAnalyze={analyzeOne}
-            analyzing={!!analyzing[sym]}
-          />
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--hairline)' }}>
+        {[{ id: 'decisions', label: '⚡ Décisions' }, { id: 'comparison', label: '📊 Comparaison' }].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              padding: '10px 20px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer',
+              color: tab === t.id ? 'var(--accent)' : 'var(--fg-3)',
+              borderBottom: `2px solid ${tab === t.id ? 'var(--accent)' : 'transparent'}`,
+              marginBottom: -1, transition: 'all 0.15s',
+            }}
+          >{t.label}</button>
         ))}
-        {tickers.length === 0 && (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px 0', color: 'var(--fg-4)' }}>
-            Aucun ticker configuré — allez dans <strong>Configuration</strong> pour en ajouter.
-          </div>
-        )}
       </div>
+
+      {tab === 'decisions' && (
+        <>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
+            <button className="btn accent" onClick={analyzeAll} disabled={analyzingAll} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {analyzingAll
+                ? <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />Analyse en cours…</>
+                : '⚡ Analyser tous les tickers'}
+            </button>
+            <button className="btn" onClick={loadAll} style={{ fontSize: 13 }}>Actualiser</button>
+            {statusMsg && <span style={{ fontSize: 13, color: 'var(--fg-3)' }}>{statusMsg}</span>}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 16, marginBottom: 40 }}>
+            {tickers.map(sym => (
+              <AgentTickerCard
+                key={sym}
+                sym={sym}
+                decision={decisions[sym]}
+                onAnalyze={analyzeOne}
+                analyzing={!!analyzing[sym]}
+              />
+            ))}
+            {tickers.length === 0 && (
+              <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px 0', color: 'var(--fg-4)' }}>
+                Aucun ticker configuré — allez dans <strong>Configuration</strong> pour en ajouter.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === 'comparison' && <ComparisonView />}
     </>
   );
 }

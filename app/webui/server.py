@@ -87,6 +87,18 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 init_database()
 
+# ── AI Scheduler startup ───────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def _start_ai_scheduler():
+    """Start the AI analysis scheduler on server startup."""
+    try:
+        from app.ai import scheduler as ai_scheduler
+        ai_scheduler.start()
+        logger.info("AI scheduler launched from server startup")
+    except Exception as exc:
+        logger.warning("Could not start AI scheduler: %s", exc)
+
 # ── Helpers ───────────────────────────────────────────────────────────────────────
 
 
@@ -508,7 +520,9 @@ def get_config():
     saved_key = _read_env_key("OPENROUTER_API_KEY")
 
     return {
-        "capital": lt.get("initial_capital", cfg.get("default_capital", 10000)),
+        "capital": lt.get("initial_capital", cfg.get("algo_capital", cfg.get("default_capital", 10000))),
+        "algo_capital": cfg.get("algo_capital", cfg.get("default_capital", 10000)),
+        "aria_capital": cfg.get("aria_capital", 10000),
         "risk": 2.0,
         "max_positions": len(default_symbols),
         "strategy": lt.get("strategy", "composite"),
@@ -543,8 +557,18 @@ def save_config(body: dict = Body(default={})):
         cfg = _load_config()
         lt = cfg.setdefault("live_trading", {})
 
-        if "capital" in body:
+        if "algo_capital" in body:
+            cfg["algo_capital"] = float(body["algo_capital"])
+            lt["initial_capital"] = float(body["algo_capital"])
+        elif "capital" in body:
             lt["initial_capital"] = body["capital"]
+        if "aria_capital" in body:
+            cfg["aria_capital"] = float(body["aria_capital"])
+            try:
+                from app.ai import aria_portfolio as ap
+                ap.set_initial_capital(float(body["aria_capital"]))
+            except Exception:
+                pass
         if "strategy" in body:
             lt["strategy"] = body["strategy"]
             strategy_label_map = {
@@ -794,7 +818,7 @@ def get_dashboard_charts():
         {"ticker": "^GDAXI", "name": "DAX 40",    "color": "#FF8787"},
     ]
 
-    # ── Capital history (portfolio snapshots, last 7 days) ─────────────────────
+    # ── Algo capital history (portfolio snapshots, last 7 days) ───────────────
     capital = {"dates": [], "values": [], "change_pct": 0.0}
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
@@ -813,6 +837,24 @@ def get_dashboard_charts():
             capital = {"dates": dates, "values": values, "change_pct": change_pct}
     except Exception as exc:
         logger.warning("Capital history error: %s", exc)
+
+    # ── ARIA capital history (last 7 days from aria_portfolio snapshots) ───────
+    aria_capital = {"values": [], "change_pct": 0.0, "current": 0.0}
+    try:
+        from app.ai import aria_portfolio as _ap
+        stats = _ap.get_stats()
+        cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=7)).timestamp()
+        recent = [s for s in stats["snapshots"] if s["ts"] >= cutoff_ts]
+        if recent:
+            vals = [round(s["value"], 2) for s in recent]
+            first_v, last_v = vals[0], vals[-1]
+            aria_capital = {
+                "values": vals,
+                "change_pct": round((last_v - first_v) / first_v * 100, 2) if first_v else 0.0,
+                "current": last_v,
+            }
+    except Exception as exc:
+        logger.debug("ARIA capital history error: %s", exc)
 
     # ── Market indices history (1h candles, 5d) ────────────────────────────────
     indices = []
@@ -856,7 +898,7 @@ def get_dashboard_charts():
 
     indices.sort(key=lambda x: INDEX_META.index(next(m for m in INDEX_META if m["ticker"] == x["ticker"])))
 
-    return {"capital": capital, "indices": indices}
+    return {"capital": capital, "aria_capital": aria_capital, "indices": indices}
 
 
 @app.get("/api/ai/score/{symbol}")
@@ -1090,7 +1132,108 @@ def _do_autonomous_analysis(ticker: str, cfg: dict) -> dict:
         data.get("key_risks", ""),
         sources,
     )
+
+    # Execute against ARIA virtual portfolio if action is tradeable
+    if action in ("BUY", "SELL"):
+        try:
+            import yfinance as yf
+            hist = yf.Ticker(ticker).history(period="1d", interval="5m")
+            if hist is not None and not hist.empty:
+                current_price = float(hist.iloc[-1]["Close"])
+                from app.ai import aria_portfolio as ap
+                cfg2 = _load_config()
+                ap.set_initial_capital(float(cfg2.get("aria_capital", 10000)))
+                ap.execute_decision(ticker.upper(), action, pos, sl, tp, current_price)
+        except Exception as exc:
+            logger.warning("ARIA portfolio execution failed for %s: %s", ticker, exc)
+
     return score_store.get_decision(ticker.upper()) or {}
+
+
+@app.get("/api/comparison")
+def get_comparison():
+    """Compare algo vs ARIA portfolio performance."""
+    cfg = _load_config()
+
+    # ── ARIA stats ────────────────────────────────────────────────────────────
+    try:
+        from app.ai import aria_portfolio as ap
+        aria_stats = ap.get_stats()
+    except Exception as exc:
+        logger.warning("Could not load ARIA portfolio: %s", exc)
+        aria_initial = cfg.get("aria_capital", 10000)
+        aria_stats = {
+            "initial_capital": aria_initial, "cash": aria_initial,
+            "current_value": aria_initial, "pnl": 0, "pnl_pct": 0,
+            "total_trades": 0, "open_positions": 0, "win_rate": 0,
+            "positions": {}, "recent_trades": [], "snapshots": [],
+        }
+
+    # ── Algo stats from SQLite ────────────────────────────────────────────────
+    algo_initial = cfg.get("algo_capital", cfg.get("default_capital", 10000))
+    algo_stats: dict = {
+        "initial_capital": algo_initial, "current_value": algo_initial,
+        "pnl": 0, "pnl_pct": 0, "total_trades": 0, "win_rate": 0,
+        "recent_trades": [], "snapshots": [],
+    }
+    try:
+        with get_session() as session:
+            run = (
+                session.query(SimRun)
+                .order_by(SimRun.id.desc())
+                .first()
+            )
+            if run:
+                snaps = (
+                    session.query(Portfolio)
+                    .filter_by(sim_run_id=run.id)
+                    .order_by(Portfolio.timestamp)
+                    .all()
+                )
+                history = [{"ts": s.timestamp.timestamp(), "value": s.total_value} for s in snaps]
+                trades = session.query(Trade).filter_by(sim_run_id=run.id).order_by(Trade.timestamp.desc()).limit(20).all()
+                cur = run.final_value or (history[-1]["value"] if history else run.initial_capital)
+                pnl = cur - run.initial_capital
+                algo_stats = {
+                    "initial_capital": run.initial_capital,
+                    "current_value": round(cur, 2),
+                    "pnl": round(pnl, 2),
+                    "pnl_pct": round(run.total_return_pct or (pnl / run.initial_capital * 100 if run.initial_capital else 0), 2),
+                    "total_trades": run.total_trades or 0,
+                    "win_rate": round(run.win_rate or 0, 3),
+                    "recent_trades": [t.to_dict() for t in trades],
+                    "snapshots": history,
+                }
+    except Exception as exc:
+        logger.warning("Could not load algo stats: %s", exc)
+
+    return {"algo": algo_stats, "aria": aria_stats}
+
+
+@app.post("/api/aria/reset")
+def reset_aria_portfolio(body: dict = Body(default={})):
+    """Reset ARIA virtual portfolio to its initial capital."""
+    try:
+        from app.ai import aria_portfolio as ap
+        cfg = _load_config()
+        capital = float(body.get("capital") or cfg.get("aria_capital", 10000))
+        ap.reset(capital)
+        return {"success": True, "message": f"Portfolio ARIA réinitialisé à {capital}"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/tickers")
+def get_ticker_list():
+    """Return the full list of all market tickers (no OHLCV fetch — instant)."""
+    tickers = get_all_tickers()
+    return {
+        "tickers": [
+            {"sym": s, "name": get_display_name(s)}
+            for s in tickers
+        ],
+        "count": len(tickers),
+    }
 
 
 @app.get("/api/ai/decisions")
@@ -1129,10 +1272,10 @@ def trigger_ai_decision(symbol: str):
 
 @app.post("/api/ai/analyze-all")
 def ai_analyze_all():
-    """Trigger autonomous analysis for all configured tickers (background thread)."""
+    """Trigger autonomous analysis for ALL market tickers (background thread)."""
     import threading
     cfg = _load_config()
-    tickers = cfg.get("live_trading", {}).get("symbols") or cfg.get("default_symbols", [])
+    tickers = get_all_tickers()
 
     def _run():
         for sym in tickers:

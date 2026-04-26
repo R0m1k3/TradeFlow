@@ -2,6 +2,8 @@
 # All monetary values are in EUR/USD (depends on asset market)
 
 default_capital: 10000
+algo_capital: 10000          # Capital dédié à l'algorithme traditionnel
+aria_capital: 10000          # Capital dédié à l'agent ARIA autonome
 
 default_symbols:
   - AAPL       # Apple (NASDAQ)
