@@ -17,6 +17,23 @@ _thread: threading.Thread | None = None
 _stop_event = threading.Event()
 _force_event = threading.Event()
 
+# Last-run tracking (updated after each completed cycle)
+_last_run_at: float | None = None
+_last_run_mode: str | None = None
+_last_run_ticker_count: int = 0
+_status_lock = threading.Lock()
+
+
+def get_status() -> dict:
+    """Return info about the last completed AI analysis cycle."""
+    with _status_lock:
+        return {
+            "last_run_at": _last_run_at,
+            "last_run_mode": _last_run_mode,
+            "last_run_ticker_count": _last_run_ticker_count,
+            "running": _thread is not None and _thread.is_alive(),
+        }
+
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 SETTINGS_PATH = Path(__file__).resolve().parents[2] / "data" / "settings.json"
@@ -238,10 +255,16 @@ def _run_loop() -> None:
 
                 mode = ai_cfg.get("mode", "hybrid")
                 if mode == "autonomous":
-                    # Runs sync (requests-based) — no asyncio needed
                     _analyze_all_autonomous(tickers, cfg)
                 else:
                     loop.run_until_complete(_analyze_all_hybrid(tickers, cfg))
+
+                with _status_lock:
+                    global _last_run_at, _last_run_mode, _last_run_ticker_count
+                    _last_run_at = time.time()
+                    _last_run_mode = mode
+                    _last_run_ticker_count = len(tickers)
+                logger.info("AI scheduler: cycle complete (%s, %d tickers)", mode, len(tickers))
             else:
                 logger.debug("AI scheduler: markets closed — skipping cycle")
 

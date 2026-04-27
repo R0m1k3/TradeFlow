@@ -678,6 +678,116 @@ def get_portfolio():
         return {"positions": [], "trades": [], "total_value": None, "total_return_pct": None, "total_trades": 0}
 
 
+@app.get("/api/portfolio/summary")
+def get_portfolio_summary():
+    """Full portfolio summary for the active live session."""
+    session = get_session()
+    try:
+        # Active session
+        run = session.query(SimRun).filter_by(is_live=True, status="running").first()
+        if run is None:
+            run = session.query(SimRun).filter_by(is_live=True).order_by(SimRun.id.desc()).first()
+        if run is None:
+            return {"active": False}
+
+        initial_cap = run.initial_capital
+        run_id = run.id
+
+        # Latest snapshot → positions + current value
+        snap = (
+            session.query(PortfolioModel)
+            .filter_by(sim_run_id=run_id)
+            .order_by(PortfolioModel.timestamp.desc())
+            .first()
+        )
+        positions_raw = json.loads(snap.positions_json) if snap else {}
+        cash = snap.cash if snap else initial_cap
+        total_value = snap.total_value if snap else initial_cap
+
+        # Enrich positions with current price from yfinance (best-effort)
+        positions = []
+        for sym, pos in positions_raw.items():
+            qty = float(pos.get("qty", 0))
+            avg = float(pos.get("avg_price", 0))
+            cur = float(pos.get("current_price", avg))
+            unrealized = (cur - avg) * qty
+            positions.append({
+                "symbol": sym,
+                "qty": qty,
+                "avg_price": avg,
+                "current_price": cur,
+                "unrealized_pnl": unrealized,
+                "unrealized_pct": ((cur - avg) / avg * 100) if avg else 0.0,
+            })
+
+        # Equity history
+        snaps = (
+            session.query(PortfolioModel)
+            .filter_by(sim_run_id=run_id)
+            .order_by(PortfolioModel.timestamp.asc())
+            .all()
+        )
+        equity = [
+            {"ts": s.timestamp.isoformat() if s.timestamp else None, "value": s.total_value, "cash": s.cash}
+            for s in snaps
+        ]
+
+        # All trades
+        trades_q = (
+            session.query(Trade)
+            .filter_by(sim_run_id=run_id)
+            .order_by(Trade.timestamp.desc())
+            .all()
+        )
+        trades = [
+            {
+                "ts": t.timestamp.isoformat() if t.timestamp else None,
+                "symbol": t.symbol,
+                "side": t.side,
+                "qty": t.quantity,
+                "price": t.price,
+                "pnl": t.pnl,
+                "reason": (t.reason or "")[:80],
+            }
+            for t in trades_q
+        ]
+
+        # Stats
+        sells = [t for t in trades if t["side"] == "SELL"]
+        n_wins = sum(1 for t in sells if t["pnl"] > 0)
+        realized_pnl = sum(t["pnl"] for t in sells)
+        win_rate = (n_wins / len(sells) * 100) if sells else 0.0
+        best = max((t["pnl"] for t in sells), default=0.0)
+        worst = min((t["pnl"] for t in sells), default=0.0)
+
+        return {
+            "active": True,
+            "run_id": run_id,
+            "initial_capital": initial_cap,
+            "start_date": run.start_date or "",
+            "interval": run.interval,
+            "total_value": total_value,
+            "cash": cash,
+            "pnl": total_value - initial_cap,
+            "pnl_pct": ((total_value - initial_cap) / initial_cap * 100) if initial_cap else 0.0,
+            "realized_pnl": realized_pnl,
+            "win_rate": win_rate,
+            "n_trades": len(trades),
+            "n_sells": len(sells),
+            "n_wins": n_wins,
+            "best_trade": best,
+            "worst_trade": worst,
+            "positions": positions,
+            "equity": equity,
+            "trades": trades,
+        }
+    except Exception as exc:
+        logger.warning("portfolio/summary failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        session.close()
+
+
 @app.get("/api/search")
 def search_stocks(query: str = Query("", description="Search query"), limit: int = Query(20)):
     """Search stocks by symbol or company name."""
@@ -1004,6 +1114,22 @@ def force_ai_analysis():
         from app.ai import scheduler as ai_scheduler
         ai_scheduler.force_now()
         return {"success": True, "message": "Analyse forcée déclenchée"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/ai/status")
+def get_ai_status():
+    """Return the AI scheduler status and last completed cycle info."""
+    try:
+        from app.ai import scheduler as ai_scheduler
+        status = ai_scheduler.get_status()
+        return {
+            "running": status["running"],
+            "last_run_at": status["last_run_at"],
+            "last_run_mode": status["last_run_mode"],
+            "last_run_ticker_count": status["last_run_ticker_count"],
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

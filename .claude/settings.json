@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from app.ai import scheduler; print\\('scheduler OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/webui/app.py'\\).read\\(\\)\\); print\\('app.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/webui/server.py'\\).read\\(\\)\\); print\\('server.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/webui/app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('app.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/webui/server.py', encoding='utf-8'\\).read\\(\\)\\); print\\('server.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/webui/pages/1_Portfolio.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+    ]
+  }
+}

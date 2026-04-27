@@ -26,7 +26,7 @@ from app.ai import scheduler as ai_scheduler
 from app.ai import score_store
 from app.ai.openrouter_client import fetch_models, test_connection
 from app.analysis.composite import compute_composite_score
-from app.bot.live_trader import create_live_session, get_active_live_session, stop_live_session
+from app.bot.live_trader import get_active_live_session, stop_live_session, resume_or_create_live_session
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
 from app.data.nasdaq import get_all_tickers, get_display_name, get_currency, format_price, format_price_sign, search_tickers
@@ -182,70 +182,85 @@ if _ai_cfg.get("enabled", False) and _read_env_key("OPENROUTER_API_KEY"):
 
 # ── Stock table builder ──────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_ticker_row(sym: str, interval: str, period: str) -> dict | None:
+    """Fetch OHLCV + compute composite score for one ticker. Cached 5 min."""
+    try:
+        df = fetch_ohlcv(sym, interval=interval, period=period)
+        if df is None or df.empty:
+            return None
+        df = add_all_indicators(df)
+        df.attrs["symbol"] = sym
+        score_data = compute_composite_score(df, sym)
+        price = float(df.iloc[-1]["close"])
+        prev_close = float(df.iloc[-2]["close"]) if len(df) >= 2 else price
+        return {
+            "price": price,
+            "change_pct": ((price - prev_close) / prev_close * 100) if prev_close else 0.0,
+            "score": score_data.combined,
+        }
+    except Exception:
+        return None
+
+
 def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> str:
-    """Generate a self-contained HTML table of stock data."""
+    """Generate a self-contained HTML table of stock data (parallel fetch, cached per ticker)."""
+    import concurrent.futures
+
     ai_cfg = _load_config().get("ai_analysis", {})
     show_ai = ai_cfg.get("enabled", False)
     ai_ttl = ai_cfg.get("score_ttl_seconds", 3600)
 
+    # Parallel fetch — up to 8 tickers at a time
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_fetch_ticker_row, sym, interval, period): sym for sym in symbols}
+        results = {sym: fut.result() for fut, sym in [(f, futures[f]) for f in concurrent.futures.as_completed(futures)]}
+
     rows_html = ""
     for sym in symbols:
-        try:
-            df = fetch_ohlcv(sym, interval=interval, period=period)
-            if df is None or df.empty:
-                continue
-
-            df = add_all_indicators(df)
-            df.attrs["symbol"] = sym
-            score_data = compute_composite_score(df, sym)
-            score = score_data.combined
-            price = float(df.iloc[-1]["close"])
-
-            if len(df) >= 2:
-                prev_close = float(df.iloc[-2]["close"])
-                change_pct = ((price - prev_close) / prev_close) * 100
-            else:
-                change_pct = 0.0
-
-            display_name = get_display_name(sym)
-            currency = get_currency(sym)
-            price_str = format_price(price, currency)
-
-            if change_pct > 0:
-                arrow = "&#9650;"
-                change_color = "#00C896"
-            elif change_pct < 0:
-                arrow = "&#9660;"
-                change_color = "#FF4B6E"
-            else:
-                arrow = "&#9646;"
-                change_color = "#8B949E"
-
-            badge_cls = signal_badge_class(score)
-            badge_label = signal_label(score)
-
-            # AI score column
-            ai_cell = ""
-            if show_ai:
-                ai_score = score_store.get_score(sym, ttl=ai_ttl)
-                if ai_score is not None:
-                    ai_cell = f'<td class="tf-td-score" style="color:{score_color(ai_score)};">{ai_score:.2f}</td>'
-                else:
-                    ai_cell = '<td class="tf-td-score" style="color:#8B949E;">—</td>'
-
-            rows_html += (
-                f'<tr>'
-                f'<td class="tf-td-sym">{sym}</td>'
-                f'<td class="tf-td-name">{display_name}</td>'
-                f'<td class="tf-td-price">{price_str}</td>'
-                f'<td class="tf-td-change" style="color:{change_color};">{arrow} {change_pct:+.2f}%</td>'
-                f'<td class="tf-td-score" style="color:{score_color(score)};">{score:.2f}</td>'
-                f'{ai_cell}'
-                f'<td class="tf-td-signal"><span class="tf-badge {badge_cls}">{badge_label}</span></td>'
-                f'</tr>'
-            )
-        except Exception:
+        data = results.get(sym)
+        if data is None:
             continue
+        price = data["price"]
+        change_pct = data["change_pct"]
+        score = data["score"]
+
+        display_name = get_display_name(sym)
+        currency = get_currency(sym)
+        price_str = format_price(price, currency)
+
+        if change_pct > 0:
+            arrow = "&#9650;"
+            change_color = "#00C896"
+        elif change_pct < 0:
+            arrow = "&#9660;"
+            change_color = "#FF4B6E"
+        else:
+            arrow = "&#9646;"
+            change_color = "#8B949E"
+
+        badge_cls = signal_badge_class(score)
+        badge_label = signal_label(score)
+
+        ai_cell = ""
+        if show_ai:
+            ai_score = score_store.get_score(sym, ttl=ai_ttl)
+            if ai_score is not None:
+                ai_cell = f'<td class="tf-td-score" style="color:{score_color(ai_score)};">{ai_score:.2f}</td>'
+            else:
+                ai_cell = '<td class="tf-td-score" style="color:#8B949E;">—</td>'
+
+        rows_html += (
+            f'<tr>'
+            f'<td class="tf-td-sym">{sym}</td>'
+            f'<td class="tf-td-name">{display_name}</td>'
+            f'<td class="tf-td-price">{price_str}</td>'
+            f'<td class="tf-td-change" style="color:{change_color};">{arrow} {change_pct:+.2f}%</td>'
+            f'<td class="tf-td-score" style="color:{score_color(score)};">{score:.2f}</td>'
+            f'{ai_cell}'
+            f'<td class="tf-td-signal"><span class="tf-badge {badge_cls}">{badge_label}</span></td>'
+            f'</tr>'
+        )
 
     if not rows_html:
         return '<div class="tf-empty">Aucune donnee disponible</div>'
@@ -254,20 +269,12 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
     return (
         f'<div class="tf-table-wrapper">'
         f'<table class="tf-stock-table">'
-        f'<thead>'
-        f'<tr>'
-        f'<th>Symbole</th>'
-        f'<th>Societe</th>'
-        f'<th>Prix</th>'
-        f'<th>Variation</th>'
-        f'<th>Score</th>'
-        f'{ai_header}'
-        f'<th>Signal</th>'
-        f'</tr>'
-        f'</thead>'
+        f'<thead><tr>'
+        f'<th>Symbole</th><th>Societe</th><th>Prix</th>'
+        f'<th>Variation</th><th>Score</th>{ai_header}<th>Signal</th>'
+        f'</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
-        f'</table>'
-        f'</div>'
+        f'</table></div>'
     )
 
 
@@ -394,11 +401,39 @@ else:
     summary_text = f"Marches fermes — ouverture dans ~{wait_min} min"
 
 pulse_anim = "animation:tf-pulse 2s infinite;" if any_open else ""
+
+# AI last-check badge
+_ai_cfg_now = _load_config().get("ai_analysis", {})
+_ai_enabled_now = _ai_cfg_now.get("enabled", False)
+_ai_status_now = ai_scheduler.get_status()
+_ai_last_now = _ai_status_now.get("last_run_at")
+if _ai_enabled_now:
+    if _ai_last_now:
+        from datetime import datetime as _dt2, timezone as _tz2
+        _elapsed_now = int((_dt2.now(_tz2.utc).timestamp() - _ai_last_now) / 60)
+        _ai_dt_now = _dt2.fromtimestamp(_ai_last_now, tz=_tz2.utc).strftime("%H:%M")
+        _mode_now = {"autonomous": "ARIA", "hybrid": "Hybride"}.get(_ai_status_now.get("last_run_mode", ""), "IA")
+        _tickers_now = _ai_status_now.get("last_run_ticker_count", 0)
+        ai_badge_html = (
+            f'<span style="color:#A78BFA;font-size:0.82rem;font-weight:600;">'
+            f'🧠 {_mode_now} — derniere verification: {_ai_dt_now} '
+            f'<span style="color:#8B949E;">({_elapsed_now} min · {_tickers_now} tickers)</span>'
+            f'</span>'
+        )
+    else:
+        ai_badge_html = '<span style="color:#8B949E;font-size:0.82rem;">🧠 IA activee — en attente du 1er cycle...</span>'
+else:
+    ai_badge_html = '<span style="color:#8B949E;font-size:0.82rem;">🧠 IA desactivee</span>'
+
 st.markdown(
     f'<div class="tf-market-grid">{markets_html}</div>'
-    f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;">'
+    f'<div style="display:flex;align-items:center;gap:16px;margin-bottom:1rem;flex-wrap:wrap;">'
+    f'<div style="display:flex;align-items:center;gap:8px;">'
     f'<div style="width:8px;height:8px;background:{summary_color};border-radius:50%;{pulse_anim}"></div>'
     f'<span style="color:{summary_color};font-size:0.85rem;font-weight:600;">{summary_text}</span>'
+    f'</div>'
+    f'<span style="color:#30363D;">|</span>'
+    f'{ai_badge_html}'
     f'</div>'
     f'<style>@keyframes tf-pulse{{0%,100%{{opacity:1}}50%{{opacity:0.3}}}}</style>',
     unsafe_allow_html=True,
@@ -432,9 +467,10 @@ if gear_clicked:
             with c_start:
                 if st.button("▶ Demarrer le bot", use_container_width=True, type="primary",
                              disabled=(active_in_dialog is not None), key="dlg_start"):
-                    run_id = create_live_session("composite", ALL_TICKERS, interval, capital)
+                    run_id, resumed = resume_or_create_live_session("composite", ALL_TICKERS, interval, capital)
                     _start_bot_process()
-                    st.success(f"Session #{run_id} lancee avec {len(ALL_TICKERS)} actions !")
+                    msg = f"Session #{run_id} reprise" if resumed else f"Session #{run_id} lancee avec {len(ALL_TICKERS)} actions !"
+                    st.success(msg)
                     st.rerun()
             with c_stop:
                 if st.button("■ Arreter le bot", use_container_width=True,
@@ -576,7 +612,24 @@ symbols_live = [s.strip() for s in active["symbol"].split(",")]
 initial_cap = active["initial_capital"]
 last_tick = active.get("last_tick_at")
 
-last_tick_html = f"<span class='tf-status-detail'>Derniere analyse: {last_tick[:19].replace('T',' ')}</span>" if last_tick else ""
+last_tick_html = f"<span class='tf-status-detail'>Derniere analyse algo: {last_tick[:19].replace('T',' ')}</span>" if last_tick else ""
+
+# AI last check
+_ai_status = ai_scheduler.get_status()
+_ai_last = _ai_status.get("last_run_at")
+if _ai_last:
+    from datetime import datetime as _dt, timezone as _tz
+    _ai_dt = _dt.fromtimestamp(_ai_last, tz=_tz.utc).strftime("%Y-%m-%d %H:%M")
+    _ai_elapsed = int((_dt.now(_tz.utc).timestamp() - _ai_last) / 60)
+    _ai_mode_label = {"autonomous": "ARIA", "hybrid": "Hybride"}.get(_ai_status.get("last_run_mode", ""), "IA")
+    ai_last_html = (
+        f"<span class='tf-status-detail' style='color:#A78BFA;'>"
+        f"Derniere verif {_ai_mode_label}: {_ai_dt} ({_ai_elapsed} min)"
+        f"</span>"
+    )
+else:
+    ai_last_html = "<span class='tf-status-detail' style='color:#8B949E;'>IA: aucune analyse</span>"
+
 st.markdown(
     f'<div class="tf-status">'
     f'<div class="tf-status-dot"></div>'
@@ -585,6 +638,7 @@ st.markdown(
     f'<span class="tf-status-detail">{len(symbols_live)} actions</span>'
     f'<span class="tf-status-detail">{active["interval"]}</span>'
     f'{last_tick_html}'
+    f'{ai_last_html}'
     f'</div>',
     unsafe_allow_html=True,
 )

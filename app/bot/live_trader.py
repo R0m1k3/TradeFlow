@@ -355,6 +355,56 @@ def create_live_session(
         session.close()
 
 
+def resume_or_create_live_session(
+    strategy: str,
+    symbols: list[str],
+    interval: str,
+    initial_capital: float,
+) -> tuple[int, bool]:
+    """
+    Resume the most recent live session if it matches the given config,
+    otherwise create a new one. Trades and portfolio snapshots are preserved.
+
+    Returns (run_id, resumed: bool).
+    """
+    session = get_session()
+    try:
+        # Try to resume the most recent live session (running or stopped)
+        latest = (
+            session.query(SimRun)
+            .filter_by(is_live=True)
+            .order_by(SimRun.id.desc())
+            .first()
+        )
+        if latest and latest.status in ("running", "stopped"):
+            latest.status = "running"
+            session.commit()
+            logger.info("Resumed live session #%d", latest.id)
+            return latest.id, True
+
+        # No existing session — create fresh
+        run = SimRun(
+            strategy=strategy,
+            symbol=",".join(symbols),
+            interval=interval,
+            initial_capital=initial_capital,
+            is_live=True,
+            status="running",
+            start_date=datetime.now(timezone.utc).date().isoformat(),
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        logger.info("Created live session #%d — %s on %s", run.id, strategy, symbols)
+        return run.id, False
+    except SQLAlchemyError as exc:
+        session.rollback()
+        logger.error("Failed to resume/create live session: %s", exc)
+        raise
+    finally:
+        session.close()
+
+
 def stop_live_session() -> None:
     """Mark the active live session as stopped."""
     session = get_session()

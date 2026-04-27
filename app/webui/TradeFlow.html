@@ -818,6 +818,80 @@ body {
   position: relative;
 }
 
+/* Portfolio page */
+.pf-page { max-width: 1100px; margin: 0 auto; padding: 0 0 60px; }
+.pf-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) { .pf-stat-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 560px) { .pf-stat-grid { grid-template-columns: repeat(2, 1fr); } }
+.pf-stat {
+  background: var(--bg-elev-grad), var(--bg-elev);
+  border: 0.5px solid var(--hairline);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+}
+.pf-stat-val {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.pf-stat-lbl {
+  font-size: 11px;
+  color: var(--fg-4);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+}
+.pf-card {
+  background: var(--bg-elev-grad), var(--bg-elev);
+  border: 0.5px solid var(--hairline);
+  border-radius: 18px;
+  padding: 22px 26px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+.pf-card::before {
+  content: '';
+  position: absolute; inset: 0; border-radius: 18px;
+  background: linear-gradient(180deg, var(--gloss-edge) 0%, transparent 30%);
+  pointer-events: none; opacity: 0.5;
+}
+.pf-card > * { position: relative; }
+.pf-card-title {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 15px; font-weight: 600;
+  letter-spacing: -0.02em; margin-bottom: 16px;
+}
+.pf-filter-tabs {
+  display: flex; gap: 2px;
+  background: var(--chip-grad), var(--chip-bg);
+  padding: 3px; border-radius: 10px;
+  width: fit-content; margin-bottom: 16px;
+}
+.pf-filter-tab {
+  padding: 5px 14px; border-radius: 8px; font-size: 12.5px;
+  font-weight: 500; cursor: pointer; color: var(--fg-3);
+  transition: all 0.15s;
+}
+.pf-filter-tab.active {
+  background: var(--bg-elev); color: var(--fg);
+  box-shadow: var(--shadow-sm);
+}
+.pf-empty {
+  text-align: center; padding: 40px 20px;
+  color: var(--fg-4); font-size: 13px;
+}
+
 /* Config page */
 .config-grid {
   display: grid;
@@ -2764,6 +2838,253 @@ function AgentTickerCard({ sym, decision: d, onAnalyze, analyzing }) {
   );
 }
 
+// ── PortfolioScreen ────────────────────────────────────────────────────────────
+
+function PortfolioScreen({ onBack }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [tradeFilter, setTradeFilter] = React.useState('all');
+
+  React.useEffect(() => {
+    apiFetch('/api/portfolio/summary')
+      .then(d => setData(d))
+      .catch(() => setData({ active: false }))
+      .finally(() => setLoading(false));
+    const id = setInterval(() => {
+      apiFetch('/api/portfolio/summary').then(d => setData(d)).catch(() => {});
+    }, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const fmtEur = (v, sign = false) => {
+    if (v == null) return '—';
+    return (sign && v > 0 ? '+' : '') + v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  };
+  const fmtPct = (v) => v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+
+  if (loading) return (
+    <div className="pf-page">
+      <span className="back-btn" onClick={onBack}><Icon name="arrow-left" size={15}/> Marchés</span>
+      <div className="pf-stat-grid">{[...Array(6)].map((_, i) => <div key={i} className="shimmer" style={{ height: 72, borderRadius: 14 }} />)}</div>
+      <div className="shimmer" style={{ height: 220, borderRadius: 18, marginBottom: 18 }} />
+      <div className="shimmer" style={{ height: 180, borderRadius: 18 }} />
+    </div>
+  );
+
+  if (!data?.active) return (
+    <div className="pf-page">
+      <span className="back-btn" onClick={onBack}><Icon name="arrow-left" size={15}/> Marchés</span>
+      <div className="pf-empty">
+        <Icon name="chart" size={36} stroke={1} />
+        <div style={{ marginTop: 12, fontWeight: 600, fontSize: 15, color: 'var(--fg-2)' }}>Aucune session active</div>
+        <div style={{ marginTop: 6 }}>Démarrez le bot depuis Bot → Configuration pour voir votre portefeuille.</div>
+      </div>
+    </div>
+  );
+
+  const { initial_capital, total_value, cash, pnl, pnl_pct, realized_pnl,
+          win_rate, n_trades, n_sells, n_wins, best_trade, worst_trade,
+          positions, equity, trades, start_date, run_id } = data;
+
+  const isUp = pnl >= 0;
+  const upColor = 'var(--up)';
+  const downColor = 'var(--down)';
+  const pnlColor = isUp ? upColor : downColor;
+
+  // Build equity chart series
+  const equityValues = (equity || []).map(e => e.value);
+  const cashValues = (equity || []).map(e => e.cash);
+  const equityDates = (equity || []).map(e => e.ts ? e.ts.slice(5, 16).replace('T', ' ') : '');
+  const xTicks = equityDates.length > 1
+    ? [equityDates[0], equityDates[Math.floor(equityDates.length / 2)], equityDates[equityDates.length - 1]]
+    : [];
+
+  // Filter trades
+  const filteredTrades = (trades || []).filter(t =>
+    tradeFilter === 'all' || (tradeFilter === 'buy' && t.side === 'BUY') || (tradeFilter === 'sell' && t.side === 'SELL')
+  ).slice(0, 100);
+
+  // P&L par action (bar chart SVG)
+  const pnlBySym = {};
+  (trades || []).filter(t => t.side === 'SELL').forEach(t => {
+    pnlBySym[t.symbol] = (pnlBySym[t.symbol] || 0) + t.pnl;
+  });
+  const pnlEntries = Object.entries(pnlBySym).sort((a, b) => b[1] - a[1]);
+
+  const BarChart = ({ entries }) => {
+    if (!entries.length) return <div className="pf-empty">Aucune vente enregistrée</div>;
+    const maxAbs = Math.max(...entries.map(([, v]) => Math.abs(v)), 1);
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {entries.map(([sym, val]) => {
+          const pct = Math.abs(val) / maxAbs * 100;
+          const c = val >= 0 ? upColor : downColor;
+          return (
+            <div key={sym} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+              <div style={{ width: 52, fontFamily: 'monospace', fontWeight: 600, color: 'var(--fg-2)', textAlign: 'right', flexShrink: 0 }}>{sym}</div>
+              <div style={{ flex: 1, background: 'var(--chip-bg)', borderRadius: 4, height: 14, overflow: 'hidden' }}>
+                <div style={{ width: `${pct}%`, background: c, height: '100%', borderRadius: 4, opacity: 0.85 }} />
+              </div>
+              <div style={{ width: 80, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: c, fontWeight: 600, flexShrink: 0 }}>
+                {fmtEur(val, true)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="pf-page">
+      <span className="back-btn" onClick={onBack}><Icon name="arrow-left" size={15}/> Marchés</span>
+
+      {/* Stats */}
+      <div className="pf-stat-grid">
+        <div className="pf-stat">
+          <div className="pf-stat-val" style={{ color: pnlColor }}>{fmtEur(total_value)}</div>
+          <div className="pf-stat-lbl">Valeur totale</div>
+        </div>
+        <div className="pf-stat">
+          <div className="pf-stat-val" style={{ color: pnlColor }}>{fmtPct(pnl_pct)}</div>
+          <div className="pf-stat-lbl">Rendement</div>
+        </div>
+        <div className="pf-stat">
+          <div className="pf-stat-val" style={{ color: realized_pnl >= 0 ? upColor : downColor }}>{fmtEur(realized_pnl, true)}</div>
+          <div className="pf-stat-lbl">P&L réalisé</div>
+        </div>
+        <div className="pf-stat">
+          <div className="pf-stat-val">{fmtEur(cash)}</div>
+          <div className="pf-stat-lbl">Cash disponible</div>
+        </div>
+        <div className="pf-stat">
+          <div className="pf-stat-val">{n_sells > 0 ? win_rate.toFixed(0) + '%' : '—'}</div>
+          <div className="pf-stat-lbl">Win Rate ({n_wins}/{n_sells})</div>
+        </div>
+        <div className="pf-stat">
+          <div className="pf-stat-val">{n_trades}</div>
+          <div className="pf-stat-lbl">Trades totaux</div>
+        </div>
+      </div>
+
+      {/* Equity curve */}
+      <div className="pf-card">
+        <div className="pf-card-title">Évolution du portefeuille</div>
+        {equityValues.length > 1 ? (
+          <div style={{ overflowX: 'hidden' }}>
+            <LineChart
+              series={[
+                { data: equityValues, color: isUp ? '#2FD66B' : '#FF4D5E' },
+                { data: cashValues, color: '#60a5fa' },
+              ]}
+              width={1020} height={200}
+              fill={true}
+              yLabel={v => (v / 1000).toFixed(1) + 'k'}
+              xLabels={xTicks}
+            />
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: 'var(--fg-4)' }}>
+              <span style={{ color: isUp ? '#2FD66B' : '#FF4D5E' }}>● Valeur totale</span>
+              <span style={{ color: '#60a5fa' }}>● Cash</span>
+              <span style={{ marginLeft: 'auto' }}>Capital initial : {fmtEur(initial_capital)} · Session #{run_id} depuis le {start_date}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="pf-empty">En attente des premières données du bot...</div>
+        )}
+      </div>
+
+      {/* Positions */}
+      <div className="pf-card">
+        <div className="pf-card-title">Positions ouvertes {positions.length > 0 && `(${positions.length})`}</div>
+        {positions.length === 0 ? (
+          <div className="pf-empty">Aucune position ouverte actuellement.</div>
+        ) : (
+          <div className="tbl-wrap">
+            <table className="tbl" style={{ width: '100%' }}>
+              <thead><tr>
+                <th>Symbole</th>
+                <th>Quantité</th>
+                <th>Prix moyen</th>
+                <th>Prix actuel</th>
+                <th>P&L non réalisé</th>
+                <th>%</th>
+              </tr></thead>
+              <tbody>
+                {[...positions].sort((a, b) => Math.abs(b.unrealized_pnl) - Math.abs(a.unrealized_pnl)).map(p => {
+                  const c = p.unrealized_pnl >= 0 ? upColor : downColor;
+                  return (
+                    <tr key={p.symbol}>
+                      <td><span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{p.symbol}</span></td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{p.qty.toFixed(4)}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtEur(p.avg_price)}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtEur(p.current_price)}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums', color: c, fontWeight: 600 }}>{fmtEur(p.unrealized_pnl, true)}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums', color: c, fontWeight: 600 }}>{fmtPct(p.unrealized_pct)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* P&L by symbol */}
+      {pnlEntries.length > 0 && (
+        <div className="pf-card">
+          <div className="pf-card-title">P&L réalisé par action</div>
+          <BarChart entries={pnlEntries} />
+        </div>
+      )}
+
+      {/* Trade history */}
+      <div className="pf-card">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div className="pf-card-title" style={{ marginBottom: 0 }}>Historique des trades</div>
+          <div className="pf-filter-tabs">
+            {[['all','Tous'],['buy','Achats'],['sell','Ventes']].map(([k, lbl]) => (
+              <span key={k} className={`pf-filter-tab ${tradeFilter === k ? 'active' : ''}`} onClick={() => setTradeFilter(k)}>{lbl}</span>
+            ))}
+          </div>
+        </div>
+        {filteredTrades.length === 0 ? (
+          <div className="pf-empty">Aucun trade pour ce filtre.</div>
+        ) : (
+          <div className="tbl-wrap">
+            <table className="tbl" style={{ width: '100%' }}>
+              <thead><tr>
+                <th>Date</th><th>Type</th><th>Symbole</th>
+                <th>Quantité</th><th>Prix</th><th>P&L</th><th>Raison</th>
+              </tr></thead>
+              <tbody>
+                {filteredTrades.map((t, i) => {
+                  const isBuy = t.side === 'BUY';
+                  const pnlC = t.pnl > 0 ? upColor : t.pnl < 0 ? downColor : 'var(--fg-4)';
+                  const ts = t.ts ? t.ts.slice(5, 16).replace('T', ' ') : '—';
+                  return (
+                    <tr key={i}>
+                      <td style={{ color: 'var(--fg-4)', fontSize: 12, whiteSpace: 'nowrap' }}>{ts}</td>
+                      <td><span style={{ color: isBuy ? upColor : downColor, fontWeight: 700, fontSize: 11 }}>{isBuy ? 'ACHAT' : 'VENTE'}</span></td>
+                      <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>{t.symbol}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--fg-3)' }}>{t.qty?.toFixed(4)}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtEur(t.price)}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums', color: pnlC, fontWeight: 600 }}>
+                        {t.side === 'SELL' ? fmtEur(t.pnl, true) : '—'}
+                      </td>
+                      <td style={{ color: 'var(--fg-4)', fontSize: 11, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.reason}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {(trades || []).length > 100 && <div style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 10, textAlign: 'right' }}>Affichage limité à 100 trades sur {trades.length}.</div>}
+      </div>
+    </div>
+  );
+}
+
 // ── Comparison view ───────────────────────────────────────────────────────────
 
 function ComparisonView() {
@@ -3061,6 +3382,7 @@ function App() {
   const openStock = (s) => { setActiveStock(s); setScreen('detail'); window.scrollTo(0, 0); };
   const openConfig = () => { setScreen('config'); window.scrollTo(0, 0); };
   const openAgent = () => { setScreen('agent'); window.scrollTo(0, 0); };
+  const openPortfolio = () => { setScreen('portfolio'); window.scrollTo(0, 0); };
   const goHome = () => { setScreen('home'); };
 
   return (
@@ -3073,6 +3395,7 @@ function App() {
         <div className="nav-links">
           <span className={`nav-link ${screen === 'home' ? 'active' : ''}`} onClick={goHome}>Marchés</span>
           <span className={`nav-link ${screen === 'detail' ? 'active' : ''}`} onClick={() => activeStock && setScreen('detail')}>Analyse</span>
+          <span className={`nav-link ${screen === 'portfolio' ? 'active' : ''}`} onClick={openPortfolio}>Portefeuille</span>
           <span className={`nav-link ${screen === 'agent' ? 'active' : ''}`} onClick={openAgent}>Agent IA</span>
           <span className={`nav-link ${screen === 'config' ? 'active' : ''}`} onClick={openConfig}>Bot</span>
         </div>
@@ -3095,6 +3418,9 @@ function App() {
       )}
       {screen === 'detail' && activeStock && (
         <DetailScreen stock={activeStock} onBack={goHome} />
+      )}
+      {screen === 'portfolio' && (
+        <PortfolioScreen onBack={goHome} />
       )}
       {screen === 'agent' && (
         <AIAgentScreen onBack={goHome} />
