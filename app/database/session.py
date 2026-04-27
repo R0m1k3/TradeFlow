@@ -101,6 +101,47 @@ def _migrate(engine: Engine) -> None:
         except Exception:
             pass
 
+        # v4: ai_signals and bot_decisions tables
+        try:
+            conn.execute(__import__("sqlalchemy").text(
+                """CREATE TABLE IF NOT EXISTS ai_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol VARCHAR(16) NOT NULL,
+                    interval VARCHAR(8) NOT NULL DEFAULT '1d',
+                    mode VARCHAR(16) NOT NULL DEFAULT 'autonomous',
+                    score FLOAT,
+                    action VARCHAR(8),
+                    confidence FLOAT,
+                    position_size_pct FLOAT,
+                    stop_loss_pct FLOAT,
+                    take_profit_pct FLOAT,
+                    rationale TEXT,
+                    key_risks TEXT,
+                    sources_json TEXT,
+                    computed_at DATETIME NOT NULL
+                )"""
+            ))
+            conn.execute(__import__("sqlalchemy").text(
+                "CREATE INDEX IF NOT EXISTS ix_ai_sym_int_ts "
+                "ON ai_signals (symbol, interval, computed_at)"
+            ))
+            conn.execute(__import__("sqlalchemy").text(
+                """CREATE TABLE IF NOT EXISTS bot_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sim_run_id INTEGER NOT NULL REFERENCES sim_runs(id),
+                    symbol VARCHAR(16) NOT NULL,
+                    timestamp DATETIME NOT NULL,
+                    action VARCHAR(8) NOT NULL,
+                    reason TEXT NOT NULL,
+                    price FLOAT,
+                    ai_action VARCHAR(8),
+                    ai_confidence FLOAT
+                )"""
+            ))
+            conn.commit()
+        except Exception:
+            pass
+
 
 def init_database() -> None:
     """

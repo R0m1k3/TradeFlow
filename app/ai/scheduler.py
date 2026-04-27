@@ -10,6 +10,7 @@ import yaml
 
 from app.ai import score_store
 from app.ai.openrouter_client import fetch_ai_score, AUTONOMOUS_PROMPT_TEMPLATE
+from app.ai.persist import save_ai_signal
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,14 @@ async def _analyze_all_hybrid(tickers: list[str], cfg: dict) -> None:
             try:
                 score, rationale, sources = await fetch_ai_score(ticker, model, api_key, timeout)
                 score_store.set_score(ticker, score, rationale, sources)
+                save_ai_signal(
+                    symbol=ticker,
+                    mode="hybrid",
+                    computed_at=datetime.now(timezone.utc),
+                    score=score,
+                    rationale=rationale,
+                    sources=sources,
+                )
                 logger.info("AI score %s → %.2f | %s", ticker, score, rationale[:80])
             except Exception as exc:
                 logger.warning("AI score failed for %s: %s", ticker, exc)
@@ -197,6 +206,19 @@ def _analyze_all_autonomous(tickers: list[str], cfg: dict) -> None:
                 data.get("rationale", ""),
                 data.get("key_risks", ""),
                 sources,
+            )
+            save_ai_signal(
+                symbol=ticker,
+                mode="autonomous",
+                computed_at=datetime.now(timezone.utc),
+                action=action,
+                confidence=confidence,
+                position_size_pct=pos_pct,
+                stop_loss_pct=sl,
+                take_profit_pct=tp,
+                rationale=data.get("rationale", ""),
+                key_risks=data.get("key_risks", ""),
+                sources=sources,
             )
             logger.info("ARIA %s → %s (conf=%.2f)", ticker, action, confidence)
 

@@ -22,7 +22,7 @@ from streamlit_autorefresh import st_autorefresh
 from app.bot.live_trader import get_active_live_session
 from app.data.fetcher import fetch_ohlcv
 from app.data.nasdaq import get_display_name, get_currency, format_price, format_price_sign
-from app.database.models import Portfolio as PortfolioModel, Trade
+from app.database.models import BotDecisionLog, Portfolio as PortfolioModel, Trade
 from app.database.session import get_session, init_database
 from app.webui.explanations import pnl_color, pnl_class
 
@@ -351,6 +351,82 @@ if not trades_df.empty and not sells.empty:
         xaxis=dict(color="#8B949E"),
     )
     st.plotly_chart(fig2, use_container_width=True)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_recent_decisions(run_id: int) -> pd.DataFrame:
+    s = get_session()
+    try:
+        logs = (
+            s.query(BotDecisionLog)
+            .filter_by(sim_run_id=run_id)
+            .order_by(BotDecisionLog.timestamp.desc())
+            .limit(50)
+            .all()
+        )
+        return pd.DataFrame([l.to_dict() for l in logs]) if logs else pd.DataFrame()
+    finally:
+        s.close()
+
+
+# ── Mémoire du bot (dernières décisions) ───────────────────────────────────────
+
+st.markdown('<div class="tf-section">Memoire du bot — dernieres decisions</div>', unsafe_allow_html=True)
+
+decisions_df = _load_recent_decisions(run_id)
+if decisions_df.empty:
+    st.markdown(
+        '<div class="tf-empty">Aucune decision enregistree pour cette session.</div>',
+        unsafe_allow_html=True,
+    )
+else:
+    rows_html = ""
+    for _, row in decisions_df.head(20).iterrows():
+        ts = pd.to_datetime(row.get("timestamp", ""))
+        t_str = ts.strftime("%d/%m %H:%M") if pd.notna(ts) else "—"
+        action = row.get("action", "")
+        sym = row.get("symbol", "")
+        reason = (row.get("reason", "") or "")[:90]
+        ai_action = row.get("ai_action", "")
+        ai_conf = row.get("ai_confidence")
+
+        if action == "BUY":
+            action_color = "#00C896"
+        elif action == "SKIP":
+            action_color = "#8B949E"
+        elif action == "SELL":
+            action_color = "#FF4B6E"
+        else:
+            action_color = "#8B949E"
+
+        ai_badge = ""
+        if ai_action:
+            ai_badge = f'<span style="color:#A78BFA;font-size:0.75rem;margin-left:6px;">IA: {ai_action}'
+            if ai_conf is not None:
+                ai_badge += f' ({ai_conf:.2f})'
+            ai_badge += '</span>'
+
+        rows_html += (
+            f'<tr>'
+            f'<td style="padding:0.5rem 0.8rem;white-space:nowrap;color:#8B949E;font-size:0.8rem;">{t_str}</td>'
+            f'<td style="padding:0.5rem 0.5rem;font-weight:700;color:{action_color};font-size:0.8rem;">{action}</td>'
+            f'<td style="font-weight:700;font-family:monospace;padding:0.5rem 0.5rem;font-size:0.8rem;">{sym}</td>'
+            f'<td style="color:#8B949E;font-size:0.78rem;padding:0.5rem 0.8rem;">{reason}</td>'
+            f'<td style="padding:0.5rem 0.8rem;">{ai_badge}</td>'
+            f'</tr>'
+        )
+
+    st.markdown(
+        f'<div class="tf-table-wrapper">'
+        f'<table class="tf-stock-table">'
+        f'<thead><tr>'
+        f'<th>Date</th><th>Action</th><th>Symbole</th><th>Raison</th><th>Signal IA</th>'
+        f'</tr></thead>'
+        f'<tbody>{rows_html}</tbody>'
+        f'</table></div>',
+        unsafe_allow_html=True,
+    )
+
+st.markdown("---")
 
 # ── Historique complet des trades ──────────────────────────────────────────────
 

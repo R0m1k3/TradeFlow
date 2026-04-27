@@ -24,8 +24,11 @@ from typing import Optional
 
 import pandas as pd
 
+from app.ai.persist import get_latest_ai_signal
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
+from app.database.models import BotDecisionLog
+from app.database.session import get_session
 from app.meta_label.meta_labeler import MetaLabeler, build_features
 from app.regime.detector import Regime, RegimeDetector
 from app.risk.manager import PortfolioSnapshot, RiskManager, RiskVerdict
@@ -74,6 +77,7 @@ class TraderV2:
         self.broker = VirtualBroker(config.commission_rate, config.slippage_rate)
         self.portfolio = Portfolio(config.initial_capital)
         self.position_states: dict[str, PositionState] = {}
+        self.run_id: int | None = None
 
         # Strategies
         self.dual_momentum = DualMomentumStrategy()
@@ -134,21 +138,62 @@ class TraderV2:
     # ── Entry evaluation ──────────────────────────────────────────────────────
 
     def _evaluate_entry(self, symbol: str, regime_signal) -> Optional[dict]:
+        # 1. Lire le signal IA
+        ai = get_latest_ai_signal(symbol, interval=self.config.bars_interval)
+        ai_action = ai.get("action") if ai else None
+        ai_confidence = ai.get("confidence") if ai else None
+        ai_rationale = ai.get("rationale", "") if ai else ""
+
+        # 2. Signal technique (fallback si pas de signal IA)
         df = fetch_ohlcv(symbol, interval=self.config.bars_interval, period=self.config.bars_period)
         if df is None or df.empty or len(df) < 250:
+            self._log_decision(symbol, "SKIP", "Donnees insuffisantes", ai_action=ai_action, ai_confidence=ai_confidence)
             return None
         df = add_all_indicators(df)
 
         # Primary signal
         if self.config.primary_strategy == "pullback_trend":
             decision = self.pullback.generate(df, in_position=False)
-            if decision.signal != PullbackSignal.LONG:
-                return None
+            tech_signal = decision.signal
             entry = decision.entry
             atr = decision.atr
             primary_reason = decision.reason
         else:
-            # Dual momentum needs the full universe — handled elsewhere
+            self._log_decision(symbol, "SKIP", "Strategie non supportee", ai_action=ai_action, ai_confidence=ai_confidence)
+            return None
+
+        # 3. L'IA a le dernier mot — pas de dependance avec la technique
+        action_taken = "HOLD"
+        reason_parts = []
+
+        if ai_action == "BUY" and ai_confidence is not None and ai_confidence >= 0.65:
+            action_taken = "BUY"
+            reason_parts.append(f"IA BUY (conf={ai_confidence:.2f}) — decision autonome")
+        elif ai_action == "SELL" and ai_confidence is not None and ai_confidence >= 0.65:
+            action_taken = "SKIP"
+            reason_parts.append(f"IA SELL (conf={ai_confidence:.2f}) — pas d'entree")
+        else:
+            # Fallback sur la technique si pas de signal IA recent ou confiance insuffisante
+            if tech_signal == PullbackSignal.LONG:
+                action_taken = "BUY"
+                reason_parts.append(f"Technique pullback LONG (fallback — pas de signal IA)")
+            else:
+                action_taken = "SKIP"
+                reason_parts.append(
+                    f"IA {ai_action or 'N/A'} (conf={ai_confidence or 0:.2f}) → SKIP | Technique: {primary_reason}"
+                )
+
+        # Loguer la decision
+        self._log_decision(
+            symbol=symbol,
+            action=action_taken,
+            reason=" | ".join(reason_parts),
+            price=entry,
+            ai_action=ai_action,
+            ai_confidence=ai_confidence,
+        )
+
+        if action_taken != "BUY":
             return None
 
         # Meta-labeler filter
@@ -158,6 +203,7 @@ class TraderV2:
                 act, p_success = self.meta_labeler.should_act(features)
                 if not act:
                     logger.info("Meta-labeler rejected %s (P=%.2f)", symbol, p_success)
+                    self._log_decision(symbol, "SKIP", f"Meta-labeler rejected (P={p_success:.2f})", price=entry, ai_action=ai_action, ai_confidence=ai_confidence)
                     return {
                         "symbol": symbol,
                         "action": "skip_meta",
@@ -174,6 +220,7 @@ class TraderV2:
             portfolio=snapshot,
         )
         if not verdict.approved:
+            self._log_decision(symbol, "SKIP", f"Risk manager rejected: {verdict.reason}", price=entry, ai_action=ai_action, ai_confidence=ai_confidence)
             return {
                 "symbol": symbol,
                 "action": "rejected",
@@ -184,6 +231,7 @@ class TraderV2:
         # Apply regime exposure multiplier
         size = verdict.size * regime_signal.exposure_multiplier
         if size < self.risk_manager.min_shares:
+            self._log_decision(symbol, "SKIP", f"Taille trop petite: {size:.6f}", price=entry, ai_action=ai_action, ai_confidence=ai_confidence)
             return None
 
         # Execute
@@ -195,6 +243,7 @@ class TraderV2:
             timestamp=datetime.now(timezone.utc),
         )
         if not order or not self.portfolio.apply_order(order):
+            self._log_decision(symbol, "SKIP", "Execution echouee", price=entry, ai_action=ai_action, ai_confidence=ai_confidence)
             return {"symbol": symbol, "action": "execution_failed"}
 
         self.position_states[symbol] = PositionState(
@@ -207,6 +256,7 @@ class TraderV2:
             high_water=order.executed_price,
             atr_at_entry=atr,
         )
+        self._log_decision(symbol, "BUY", f"Achete {size:.4f} @ {order.executed_price:.2f}", price=order.executed_price, ai_action=ai_action, ai_confidence=ai_confidence)
         logger.info(
             "✅ BUY %s qty=%.4f @ %.2f stop=%.2f reason=%s",
             symbol, size, order.executed_price, verdict.initial_stop, primary_reason,
@@ -219,6 +269,56 @@ class TraderV2:
             "stop": verdict.initial_stop,
             "reason": primary_reason,
         }
+
+    # ── Memory / Decision logging ─────────────────────────────────────────────
+
+    def _log_decision(
+        self,
+        symbol: str,
+        action: str,
+        reason: str,
+        price: float | None = None,
+        ai_action: str | None = None,
+        ai_confidence: float | None = None,
+    ) -> None:
+        """Log each decision to the persistent bot_decisions table."""
+        run_id = self._resolve_run_id()
+        if run_id is None:
+            return
+        session = get_session()
+        try:
+            log = BotDecisionLog(
+                sim_run_id=run_id,
+                symbol=symbol,
+                timestamp=datetime.now(timezone.utc),
+                action=action,
+                reason=reason,
+                price=price,
+                ai_action=ai_action,
+                ai_confidence=ai_confidence,
+            )
+            session.add(log)
+            session.commit()
+        except Exception:
+            session.rollback()
+        finally:
+            session.close()
+
+    def _resolve_run_id(self) -> int | None:
+        """Resolve the current active live run_id from the DB."""
+        if self.run_id is not None:
+            return self.run_id
+        try:
+            from app.database.models import SimRun
+            session = get_session()
+            run = session.query(SimRun).filter_by(is_live=True, status="running").first()
+            session.close()
+            if run:
+                self.run_id = run.id
+                return run.id
+        except Exception:
+            pass
+        return None
 
     # ── Position management ───────────────────────────────────────────────────
 

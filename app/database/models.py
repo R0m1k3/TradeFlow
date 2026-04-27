@@ -1,6 +1,6 @@
 """
 TradeFlow — SQLAlchemy Database Models
-Defines ORM tables: SimRun, Trade, Portfolio, PriceCache
+Defines ORM tables: SimRun, Trade, Portfolio, PriceCache, AISignal, BotDecisionLog
 """
 
 from __future__ import annotations
@@ -234,4 +234,79 @@ class PriceCache(Base):
             "low": self.low,
             "close": self.close,
             "volume": self.volume,
+        }
+
+
+class AISignal(Base):
+    """
+    Persiste les signaux et decisions IA calcules par le scheduler.
+    """
+    __tablename__ = "ai_signals"
+    __table_args__ = (
+        Index("ix_ai_sym_int_ts", "symbol", "interval", "computed_at"),
+    )
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    symbol: str = Column(String(16), nullable=False)
+    interval: str = Column(String(8), nullable=False, default="1d")
+    mode: str = Column(String(16), nullable=False, default="autonomous")
+    score: float = Column(Float, nullable=True)
+    action: str = Column(String(8), nullable=True)
+    confidence: float = Column(Float, nullable=True)
+    position_size_pct: float = Column(Float, nullable=True)
+    stop_loss_pct: float = Column(Float, nullable=True)
+    take_profit_pct: float = Column(Float, nullable=True)
+    rationale: str = Column(Text, nullable=True)
+    key_risks: str = Column(Text, nullable=True)
+    sources_json: str = Column(Text, nullable=True)
+    computed_at: datetime = Column(DateTime, nullable=False,
+                                   default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "symbol": self.symbol,
+            "interval": self.interval,
+            "mode": self.mode,
+            "score": self.score,
+            "action": self.action,
+            "confidence": self.confidence,
+            "position_size_pct": self.position_size_pct,
+            "stop_loss_pct": self.stop_loss_pct,
+            "take_profit_pct": self.take_profit_pct,
+            "rationale": self.rationale,
+            "key_risks": self.key_risks,
+            "sources": json.loads(self.sources_json) if self.sources_json else [],
+            "computed_at": self.computed_at.isoformat() if self.computed_at else None,
+        }
+
+
+class BotDecisionLog(Base):
+    """
+    Memoire persistante du bot — pourquoi il a (ou pas) agi sur chaque ticker.
+    """
+    __tablename__ = "bot_decisions"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    sim_run_id: int = Column(Integer, ForeignKey("sim_runs.id"), nullable=False)
+    symbol: str = Column(String(16), nullable=False)
+    timestamp: datetime = Column(DateTime, nullable=False,
+                                  default=lambda: datetime.now(timezone.utc))
+    action: str = Column(String(8), nullable=False)
+    reason: str = Column(Text, nullable=False)
+    price: float = Column(Float, nullable=True)
+    ai_action: str = Column(String(8), nullable=True)
+    ai_confidence: float = Column(Float, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "sim_run_id": self.sim_run_id,
+            "symbol": self.symbol,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "action": self.action,
+            "reason": self.reason,
+            "price": self.price,
+            "ai_action": self.ai_action,
+            "ai_confidence": self.ai_confidence,
         }

@@ -25,6 +25,7 @@ from streamlit_autorefresh import st_autorefresh
 from app.ai import scheduler as ai_scheduler
 from app.ai import score_store
 from app.ai.openrouter_client import fetch_models, test_connection
+from app.ai.persist import get_all_latest_ai_signals
 from app.analysis.composite import compute_composite_score
 from app.bot.live_trader import get_active_live_session, stop_live_session, resume_or_create_live_session
 from app.data.fetcher import fetch_ohlcv
@@ -219,7 +220,9 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
 
     ai_cfg = _load_config().get("ai_analysis", {})
     show_ai = ai_cfg.get("enabled", False)
-    ai_ttl = ai_cfg.get("score_ttl_seconds", 3600)
+
+    # Load persisted AI signals from DB (one query for all symbols)
+    ai_signals = get_all_latest_ai_signals(interval=interval) if show_ai else {}
 
     # Parallel fetch — up to 8 tickers at a time
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
@@ -254,9 +257,24 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
 
         ai_cell = ""
         if show_ai:
-            ai_score = score_store.get_score(sym, ttl=ai_ttl)
-            if ai_score is not None:
-                ai_cell = f'<td class="tf-td-score" style="color:{score_color(ai_score)};">{ai_score:.2f}</td>'
+            ai_data = ai_signals.get(sym)
+            if ai_data:
+                ai_action = ai_data.get("action", "N/A")
+                ai_conf = ai_data.get("confidence")
+                ai_score = ai_data.get("score")
+                if ai_action:
+                    if ai_action == "BUY":
+                        ai_color = "#00C896"
+                    elif ai_action == "SELL":
+                        ai_color = "#FF4B6E"
+                    else:
+                        ai_color = "#8B949E"
+                    conf_str = f" ({ai_conf:.0%})" if ai_conf is not None else ""
+                    ai_cell = f'<td class="tf-td-score" style="color:{ai_color};font-weight:700;font-size:0.8rem;">{ai_action}{conf_str}</td>'
+                elif ai_score is not None:
+                    ai_cell = f'<td class="tf-td-score" style="color:{score_color(ai_score)};">{ai_score:.2f}</td>'
+                else:
+                    ai_cell = '<td class="tf-td-score" style="color:#8B949E;">—</td>'
             else:
                 ai_cell = '<td class="tf-td-score" style="color:#8B949E;">—</td>'
 
@@ -275,7 +293,7 @@ def stock_table_html(symbols: list[str], interval: str, period: str = "3mo") -> 
     if not rows_html:
         return '<div class="tf-empty">Aucune donnee disponible</div>'
 
-    ai_header = '<th>Score IA</th>' if show_ai else ''
+    ai_header = '<th>Signal IA</th>' if show_ai else ''
     return (
         f'<div class="tf-table-wrapper">'
         f'<table class="tf-stock-table">'
