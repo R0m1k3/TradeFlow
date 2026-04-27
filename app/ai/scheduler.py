@@ -302,9 +302,10 @@ def start() -> None:
     if _thread is not None and _thread.is_alive():
         return
     _stop_event.clear()
+    _force_event.set()  # burst initial
     _thread = threading.Thread(target=_run_loop, daemon=True, name="ai-scheduler")
     _thread.start()
-    logger.info("AI scheduler started")
+    logger.info("AI scheduler started (with immediate burst)")
 
 
 def force_now() -> None:

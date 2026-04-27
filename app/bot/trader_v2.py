@@ -17,6 +17,7 @@ remains for backward compatibility.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,8 +28,9 @@ import pandas as pd
 from app.ai.persist import get_latest_ai_signal
 from app.data.fetcher import fetch_ohlcv
 from app.data.indicators import add_all_indicators
-from app.database.models import BotDecisionLog
+from app.database.models import BotDecisionLog, Portfolio as PortfolioModel, SimRun, Trade
 from app.database.session import get_session
+from sqlalchemy.exc import SQLAlchemyError
 from app.meta_label.meta_labeler import MetaLabeler, build_features
 from app.regime.detector import Regime, RegimeDetector
 from app.risk.manager import PortfolioSnapshot, RiskManager, RiskVerdict
@@ -96,6 +98,7 @@ class TraderV2:
 
     def tick(self) -> dict:
         """One full decision cycle. Returns a status dict."""
+        run_id = self._ensure_live_run()
         actions: list[dict] = []
 
         # 1. Regime check
@@ -112,7 +115,10 @@ class TraderV2:
         # 3. New entries — only if regime allows
         if regime_signal.regime == Regime.BEAR:
             logger.info("Regime=BEAR — no new entries")
-            return self._build_status(regime_signal, actions)
+            status = self._build_status(regime_signal, actions)
+            self._save_snapshot(run_id, {})
+            self._update_tick_time(run_id)
+            return status
 
         for sym in self.config.universe:
             if sym in self.position_states:
@@ -121,7 +127,21 @@ class TraderV2:
             if action:
                 actions.append(action)
 
-        return self._build_status(regime_signal, actions)
+        status = self._build_status(regime_signal, actions)
+
+        # 4. Persist portfolio snapshot and tick time
+        current_prices = {}
+        for sym, ps in self.position_states.items():
+            try:
+                df = fetch_ohlcv(sym, interval=self.config.bars_interval, period="5d")
+                if df is not None and not df.empty:
+                    current_prices[sym] = float(df.iloc[-1]["close"])
+            except Exception:
+                current_prices[sym] = ps.entry_price
+        self._save_snapshot(run_id, current_prices)
+        self._update_tick_time(run_id)
+
+        return status
 
     # ── Regime ────────────────────────────────────────────────────────────────
 
@@ -257,6 +277,9 @@ class TraderV2:
             atr_at_entry=atr,
         )
         self._log_decision(symbol, "BUY", f"Achete {size:.4f} @ {order.executed_price:.2f}", price=order.executed_price, ai_action=ai_action, ai_confidence=ai_confidence)
+        run_id = self._resolve_run_id()
+        if run_id:
+            self._save_trade(run_id, order, primary_reason)
         logger.info(
             "✅ BUY %s qty=%.4f @ %.2f stop=%.2f reason=%s",
             symbol, size, order.executed_price, verdict.initial_stop, primary_reason,
@@ -308,17 +331,128 @@ class TraderV2:
         """Resolve the current active live run_id from the DB."""
         if self.run_id is not None:
             return self.run_id
+        session = get_session()
         try:
-            from app.database.models import SimRun
-            session = get_session()
             run = session.query(SimRun).filter_by(is_live=True, status="running").first()
-            session.close()
             if run:
                 self.run_id = run.id
                 return run.id
         except Exception:
             pass
+        finally:
+            session.close()
         return None
+
+    def _ensure_live_run(self) -> int:
+        """Create or resume a live SimRun for this trader session."""
+        if self.run_id is not None:
+            return self.run_id
+        session = get_session()
+        try:
+            latest = (
+                session.query(SimRun)
+                .filter_by(is_live=True)
+                .order_by(SimRun.id.desc())
+                .first()
+            )
+            if latest and latest.status in ("running", "stopped"):
+                latest.status = "running"
+                session.commit()
+                self.run_id = latest.id
+                logger.info("Resumed live session #%d", latest.id)
+                return latest.id
+
+            run = SimRun(
+                strategy=self.config.primary_strategy,
+                symbol=",".join(self.config.universe),
+                interval=self.config.bars_interval,
+                initial_capital=self.config.initial_capital,
+                is_live=True,
+                status="running",
+                start_date=datetime.now(timezone.utc).date().isoformat(),
+            )
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            self.run_id = run.id
+            logger.info("Created live session #%d", run.id)
+            return run.id
+        except SQLAlchemyError as exc:
+            session.rollback()
+            logger.error("Failed to create/resume live session: %s", exc)
+            raise
+        finally:
+            session.close()
+
+    def _save_trade(self, run_id: int, order, reason: str) -> None:
+        session = get_session()
+        try:
+            trade = Trade(
+                sim_run_id=run_id,
+                timestamp=order.timestamp,
+                symbol=order.symbol,
+                side=order.side.value,
+                quantity=order.quantity,
+                price=order.executed_price,
+                fees=order.fees,
+                pnl=order.pnl,
+                reason=reason,
+            )
+            session.add(trade)
+            session.commit()
+        except SQLAlchemyError as exc:
+            session.rollback()
+            logger.error("Failed to save trade: %s", exc)
+        finally:
+            session.close()
+
+    def _save_snapshot(self, run_id: int, current_prices: dict[str, float]) -> None:
+        total_value = self.portfolio.cash + sum(
+            ps.quantity * current_prices.get(ps.symbol, ps.entry_price)
+            for ps in self.position_states.values()
+        )
+        positions_data = {
+            sym: {
+                "qty": ps.quantity,
+                "avg_price": ps.entry_price,
+                "current_price": current_prices.get(sym, ps.entry_price),
+            }
+            for sym, ps in self.position_states.items()
+        }
+        session = get_session()
+        try:
+            snap = PortfolioModel(
+                sim_run_id=run_id,
+                timestamp=datetime.now(timezone.utc),
+                cash=self.portfolio.cash,
+                total_value=total_value,
+                positions_json=json.dumps(positions_data),
+            )
+            session.add(snap)
+            run = session.get(SimRun, run_id)
+            if run:
+                run.final_value = total_value
+                run.total_return_pct = (
+                    (total_value - run.initial_capital) / run.initial_capital * 100
+                ) if run.initial_capital else 0.0
+            session.commit()
+        except SQLAlchemyError as exc:
+            session.rollback()
+            logger.error("Failed to save snapshot: %s", exc)
+        finally:
+            session.close()
+
+    def _update_tick_time(self, run_id: int) -> None:
+        session = get_session()
+        try:
+            run = session.get(SimRun, run_id)
+            if run:
+                run.last_tick_at = datetime.now(timezone.utc)
+                session.commit()
+        except SQLAlchemyError as exc:
+            session.rollback()
+        finally:
+            session.close()
 
     # ── Position management ───────────────────────────────────────────────────
 
@@ -378,6 +512,9 @@ class TraderV2:
         if order:
             self.portfolio.apply_order(order)
             self.risk_manager.on_position_exit(symbol, order.pnl)
+            run_id = self._resolve_run_id()
+            if run_id:
+                self._save_trade(run_id, order, reason)
             logger.info(
                 "🔻 SELL %s qty=%.4f @ %.2f P&L=%.2f reason=%s",
                 symbol, ps.quantity, price, order.pnl, reason,
