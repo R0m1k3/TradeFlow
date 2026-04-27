@@ -162,58 +162,50 @@ class TraderV2:
         ai = get_latest_ai_signal(symbol, interval=self.config.bars_interval)
         ai_action = ai.get("action") if ai else None
         ai_confidence = ai.get("confidence") if ai else None
+        ai_score = ai.get("score") if ai else None
         ai_rationale = ai.get("rationale", "") if ai else ""
 
-        # 2. Signal technique (fallback si pas de signal IA)
-        df = fetch_ohlcv(symbol, interval=self.config.bars_interval, period=self.config.bars_period)
-        if df is None or df.empty or len(df) < 250:
-            self._log_decision(symbol, "SKIP", "Donnees insuffisantes", ai_action=ai_action, ai_confidence=ai_confidence)
-            return None
-        df = add_all_indicators(df)
+        # Interpréter le score hybrid si pas d'action autonome
+        if ai_action is None and ai_score is not None:
+            if ai_score >= 0.7:
+                ai_action = "BUY"
+                ai_confidence = ai_score
+            elif ai_score <= 0.3:
+                ai_action = "SELL"
+                ai_confidence = 1.0 - ai_score
 
-        # Primary signal
-        if self.config.primary_strategy == "pullback_trend":
-            decision = self.pullback.generate(df, in_position=False)
-            tech_signal = decision.signal
-            entry = decision.entry
-            atr = decision.atr
-            primary_reason = decision.reason
-        else:
-            self._log_decision(symbol, "SKIP", "Strategie non supportee", ai_action=ai_action, ai_confidence=ai_confidence)
-            return None
-
-        # 3. L'IA a le dernier mot — pas de dependance avec la technique
+        # 2. Décision IA — le bot suit l'IA, pas le technique
         action_taken = "HOLD"
-        reason_parts = []
+        reason = ""
 
         if ai_action == "BUY" and ai_confidence is not None and ai_confidence >= 0.65:
             action_taken = "BUY"
-            reason_parts.append(f"IA BUY (conf={ai_confidence:.2f}) — decision autonome")
+            reason = f"IA BUY (conf={ai_confidence:.2f}) — decision autonome"
         elif ai_action == "SELL" and ai_confidence is not None and ai_confidence >= 0.65:
             action_taken = "SKIP"
-            reason_parts.append(f"IA SELL (conf={ai_confidence:.2f}) — pas d'entree")
+            reason = f"IA SELL (conf={ai_confidence:.2f}) — pas d'entree"
         else:
-            # Fallback sur la technique si pas de signal IA recent ou confiance insuffisante
-            if tech_signal == PullbackSignal.LONG:
-                action_taken = "BUY"
-                reason_parts.append(f"Technique pullback LONG (fallback — pas de signal IA)")
-            else:
-                action_taken = "SKIP"
-                reason_parts.append(
-                    f"IA {ai_action or 'N/A'} (conf={ai_confidence or 0:.2f}) → SKIP | Technique: {primary_reason}"
-                )
+            action_taken = "SKIP"
+            reason = f"IA {ai_action or 'N/A'} (conf={ai_confidence or 0:.2f}, score={ai_score or 'N/A'}) → SKIP — pas de signal clair"
 
-        # Loguer la decision
-        self._log_decision(
-            symbol=symbol,
-            action=action_taken,
-            reason=" | ".join(reason_parts),
-            price=entry,
-            ai_action=ai_action,
-            ai_confidence=ai_confidence,
-        )
+        self._log_decision(symbol, action_taken, reason, ai_action=ai_action, ai_confidence=ai_confidence)
 
         if action_taken != "BUY":
+            return None
+
+        # 3. Fetch data for execution pricing and risk sizing
+        df = fetch_ohlcv(symbol, interval=self.config.bars_interval, period=self.config.bars_period)
+        if df is None or df.empty or len(df) < 250:
+            self._log_decision(symbol, "SKIP", "Donnees insuffisantes pour execution", ai_action=ai_action, ai_confidence=ai_confidence)
+            return None
+        df = add_all_indicators(df)
+
+        entry = float(df.iloc[-1]["close"])
+        atr = float(compute_atr(df, 14).iloc[-1]) if "atr" in df.columns else 0.0
+
+        # 4. Cash guard — do not evaluate if cash is too low
+        if self.portfolio.cash < entry * self.risk_manager.min_shares * 2:
+            self._log_decision(symbol, "SKIP", f"Cash insuffisant ({self.portfolio.cash:.2f})", price=entry, ai_action=ai_action, ai_confidence=ai_confidence)
             return None
 
         # Meta-labeler filter
@@ -279,10 +271,10 @@ class TraderV2:
         self._log_decision(symbol, "BUY", f"Achete {size:.4f} @ {order.executed_price:.2f}", price=order.executed_price, ai_action=ai_action, ai_confidence=ai_confidence)
         run_id = self._resolve_run_id()
         if run_id:
-            self._save_trade(run_id, order, primary_reason)
+            self._save_trade(run_id, order, reason)
         logger.info(
             "✅ BUY %s qty=%.4f @ %.2f stop=%.2f reason=%s",
-            symbol, size, order.executed_price, verdict.initial_stop, primary_reason,
+            symbol, size, order.executed_price, verdict.initial_stop, reason,
         )
         return {
             "symbol": symbol,
@@ -290,7 +282,7 @@ class TraderV2:
             "quantity": size,
             "price": order.executed_price,
             "stop": verdict.initial_stop,
-            "reason": primary_reason,
+            "reason": reason,
         }
 
     # ── Memory / Decision logging ─────────────────────────────────────────────
