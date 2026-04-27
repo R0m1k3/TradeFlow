@@ -89,6 +89,18 @@ def _migrate(engine: Engine) -> None:
                 # Column already exists — ignore
                 pass
 
+        # v3: composite index on price_cache for fast lookups
+        try:
+            conn.execute(
+                __import__("sqlalchemy").text(
+                    "CREATE INDEX IF NOT EXISTS ix_price_cache_sym_int_ts "
+                    "ON price_cache (symbol, interval, timestamp)"
+                )
+            )
+            conn.commit()
+        except Exception:
+            pass
+
 
 def init_database() -> None:
     """

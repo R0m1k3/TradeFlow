@@ -12,6 +12,7 @@ Sources (all free, no API key):
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 FNG_API_URL = "https://api.alternative.me/fng/?limit=1"
 FNG_CACHE_MAX_AGE_SECONDS = 1800  # 30 min
+
+# Module-level caches survive Streamlit reruns (same process)
+_fng_cache: dict = {"value": None, "ts": 0}
+_news_cache: dict = {}  # symbol -> {"value": float|None, "ts": float}
 
 
 @dataclass
@@ -42,14 +47,23 @@ def fetch_fear_greed_index() -> Optional[float]:
     """
     Fetch the current Crypto Fear & Greed Index from alternative.me.
     Returns value 0-100, normalized to 0-1. Returns None on failure.
+    Cached globally for 30 minutes to avoid repeated HTTP calls.
     """
+    now = time.time()
+    cached = _fng_cache.get("value")
+    if cached is not None and now - _fng_cache["ts"] < FNG_CACHE_MAX_AGE_SECONDS:
+        return cached
+
     try:
         resp = requests.get(FNG_API_URL, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         value = int(data["data"][0]["value"])
         # Normalize 0-100 → 0-1
-        return value / 100.0
+        normalized = value / 100.0
+        _fng_cache["value"] = normalized
+        _fng_cache["ts"] = now
+        return normalized
     except Exception as exc:
         logger.warning("Fear & Greed Index fetch failed: %s", exc)
         return None
@@ -59,7 +73,13 @@ def analyze_news_sentiment(symbol: str) -> Optional[float]:
     """
     Fetch recent news for a symbol via yfinance and score sentiment with TextBlob.
     Returns a 0-1 score where 0=very negative, 1=very positive.
+    Cached per-ticker for 1 hour to avoid repeated yfinance + NLP calls.
     """
+    now = time.time()
+    cached = _news_cache.get(symbol)
+    if cached is not None and now - cached["ts"] < 3600:
+        return cached["value"]
+
     try:
         import yfinance as yf
         from textblob import TextBlob
@@ -68,6 +88,7 @@ def analyze_news_sentiment(symbol: str) -> Optional[float]:
         news = ticker.news
         if not news:
             logger.debug("No news found for %s", symbol)
+            _news_cache[symbol] = {"value": None, "ts": now}
             return None
 
         scores = []
@@ -85,18 +106,23 @@ def analyze_news_sentiment(symbol: str) -> Optional[float]:
             scores.append(polarity)
 
         if not scores:
+            _news_cache[symbol] = {"value": None, "ts": now}
             return None
 
         avg_polarity = sum(scores) / len(scores)
         # Normalize -1..1 → 0..1
         normalized = (avg_polarity + 1.0) / 2.0
-        return max(0.0, min(1.0, normalized))
+        result = max(0.0, min(1.0, normalized))
+        _news_cache[symbol] = {"value": result, "ts": now}
+        return result
 
     except ImportError:
         logger.warning("textblob not installed — skipping news sentiment")
+        _news_cache[symbol] = {"value": None, "ts": now}
         return None
     except Exception as exc:
         logger.warning("News sentiment analysis failed for %s: %s", symbol, exc)
+        _news_cache[symbol] = {"value": None, "ts": now}
         return None
 
 

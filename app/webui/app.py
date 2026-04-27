@@ -39,6 +39,8 @@ from app.webui.explanations import (
     pnl_class, pnl_color, score_color, signal_badge_class, signal_label,
 )
 
+logger = logging.getLogger(__name__)
+
 # ── Page config ────────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -58,7 +60,9 @@ st.markdown("<style>#MainMenu,footer,header{visibility:hidden;}</style>", unsafe
 # Stream auto-refresh: 15s interval, silent
 st_autorefresh(interval=60000, key="stream_refresh")
 
-init_database()
+if "db_initialized" not in st.session_state:
+    init_database()
+    st.session_state.db_initialized = True
 
 # ── Config helpers ─────────────────────────────────────────────────────────────
 
@@ -167,6 +171,12 @@ def _get_bot_pid() -> int | None:
 if BOT_PID_FILE.exists():
     if _get_bot_pid() is None:
         BOT_PID_FILE.unlink(missing_ok=True)
+
+# Auto-restart bot if DB says running but process is gone
+active_session = get_active_live_session()
+if active_session is not None and _get_bot_pid() is None:
+    _start_bot_process()
+    logger.info("Auto-restarted bot for live session #%d", active_session["id"])
 
 
 # ── Load tickers ────────────────────────────────────────────────────────────────
@@ -340,7 +350,7 @@ with col_gear:
 
 # ── Market overview cards ─────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def load_market_statuses() -> list[dict]:
     return get_all_market_statuses()
 
@@ -587,7 +597,8 @@ if active is None:
 
     # Render table
     if filtered:
-        st.markdown(stock_table_html(filtered, interval="1h", period="3mo"), unsafe_allow_html=True)
+        with st.spinner("Analyse des marches en cours..."):
+            st.markdown(stock_table_html(filtered, interval="1h", period="3mo"), unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown(

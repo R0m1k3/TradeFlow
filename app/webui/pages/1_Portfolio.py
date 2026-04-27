@@ -43,7 +43,9 @@ st.markdown("<style>#MainMenu,footer,header{visibility:hidden;}</style>", unsafe
 
 st_autorefresh(interval=60_000, key="portfolio_refresh")
 
-init_database()
+if "db_initialized" not in st.session_state:
+    init_database()
+    st.session_state.db_initialized = True
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 
@@ -250,14 +252,15 @@ else:
 st.markdown('<div class="tf-section">Positions ouvertes</div>', unsafe_allow_html=True)
 
 if positions:
-    # Fetch current prices in parallel
-    import concurrent.futures
-    syms = list(positions.keys())
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-        price_futures = {sym: pool.submit(_current_price, sym) for sym in syms}
-        spark_futures = {sym: pool.submit(_sparkline, sym) for sym in syms}
-        cur_prices = {sym: price_futures[sym].result() for sym in syms}
-        sparklines = {sym: spark_futures[sym].result() for sym in syms}
+    with st.spinner("Chargement des positions..."):
+        # Fetch current prices in parallel
+        import concurrent.futures
+        syms = list(positions.keys())
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            price_futures = {sym: pool.submit(_current_price, sym) for sym in syms}
+            spark_futures = {sym: pool.submit(_sparkline, sym) for sym in syms}
+            cur_prices = {sym: price_futures[sym].result() for sym in syms}
+            sparklines = {sym: spark_futures[sym].result() for sym in syms}
 
     pos_rows = []
     for sym, pos in positions.items():

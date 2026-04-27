@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -208,6 +209,9 @@ class PriceCache(Base):
         volume: Traded volume.
     """
     __tablename__ = "price_cache"
+    __table_args__ = (
+        Index("ix_price_cache_sym_int_ts", "symbol", "interval", "timestamp"),
+    )
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     symbol: str = Column(String(16), nullable=False)
