@@ -1460,6 +1460,145 @@ def get_resilience_stats():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/api/admin/providers")
+def get_provider_stats():
+    """Return per-provider availability, coverage, and live resilience stats.
+
+    Designed to feed the /admin/providers dashboard. Each entry includes:
+      * available : True if the API key is configured
+      * coverage  : markets / intervals / intraday flag
+      * resilience: live circuit-breaker, negative-cache, backoff counters
+    """
+    try:
+        from app.data.source_router import SourceRouter
+        from app.data.resilience_hook import for_source
+        from app.data.providers.finnhub_provider import FinnhubProvider
+        from app.data.providers.twelve_data_provider import TwelveDataProvider
+        from app.data.providers.alpha_vantage_provider import AlphaVantageProvider
+        from app.data.providers.yahoo_provider import YahooProvider
+
+        providers = [
+            FinnhubProvider(),
+            TwelveDataProvider(),
+            AlphaVantageProvider(),
+            YahooProvider(),
+        ]
+        out = []
+        for p in providers:
+            guard = for_source(p.name)
+            entry = {
+                "name": p.name,
+                "available": p.is_available(),
+                "coverage": p.coverage(),
+                "resilience": guard.stats(),
+            }
+            out.append(entry)
+        return {"providers": out, "default_priority": ["finnhub", "twelve_data", "alpha_vantage", "yahoo"]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/admin/test-source")
+def test_source_chain(
+    symbol: str = Query(..., description="Ticker to test (e.g. AAPL, ROG.SW, MC.PA)"),
+    interval: str = Query("1d", description="Bar interval"),
+    period: str = Query("3mo", description="Lookback period"),
+):
+    """Run the full source chain for a ticker and report which provider answered.
+
+    Returns the chosen source, latency, and a per-source breakdown showing
+    which ones were tried and why each failed (if any). Useful for debugging
+    "why is this ticker stuck on Yahoo when Twelve Data has the key configured?"
+    """
+    try:
+        from app.data.source_router import SourceRouter
+        from app.data.resilience_hook import for_source
+        from app.data.resilience_hook import classify_exception
+        from app.data.providers.finnhub_provider import FinnhubProvider
+        from app.data.providers.twelve_data_provider import TwelveDataProvider
+        from app.data.providers.alpha_vantage_provider import AlphaVantageProvider
+        from app.data.providers.yahoo_provider import YahooProvider
+        from app.data.providers.base import ProviderError
+
+        providers = {
+            "finnhub": FinnhubProvider(),
+            "twelve_data": TwelveDataProvider(),
+            "alpha_vantage": AlphaVantageProvider(),
+            "yahoo": YahooProvider(),
+        }
+        priority = ["finnhub", "twelve_data", "alpha_vantage", "yahoo"]
+
+        attempts = []
+        chosen = None
+        chosen_df_rows = 0
+
+        for name in priority:
+            p = providers[name]
+            entry = {
+                "source": name,
+                "available": p.is_available(),
+                "attempted": False,
+                "succeeded": False,
+                "skipped_reason": None,
+                "error": None,
+                "latency_ms": 0,
+            }
+            if not p.is_available():
+                entry["skipped_reason"] = "no API key"
+                attempts.append(entry)
+                continue
+
+            guard = for_source(name)
+            key = f"{symbol}:{interval}:{period}"
+            decision = guard.before_call(key)
+            if not decision.proceed:
+                entry["skipped_reason"] = decision.reason
+                entry["guard_state"] = decision.state
+                attempts.append(entry)
+                continue
+
+            import time as _t
+            started = _t.time()
+            entry["attempted"] = True
+            try:
+                df = p.fetch_ohlcv(symbol, interval, period)
+                guard.after_success(key)
+                entry["succeeded"] = True
+                entry["latency_ms"] = int((_t.time() - started) * 1000)
+                if df is not None:
+                    entry["bars"] = len(df)
+                    entry["first_date"] = str(df.index[0]) if len(df) else None
+                    entry["last_date"] = str(df.index[-1]) if len(df) else None
+                chosen = name
+                chosen_df_rows = entry.get("bars", 0)
+                attempts.append(entry)
+                break
+            except ProviderError as exc:
+                guard.after_failure(key, kind=exc.kind)
+                entry["error"] = str(exc)
+                entry["error_kind"] = exc.kind
+                entry["latency_ms"] = int((_t.time() - started) * 1000)
+                attempts.append(entry)
+            except Exception as exc:
+                kind = classify_exception(exc)
+                guard.after_failure(key, kind=kind)
+                entry["error"] = str(exc)
+                entry["error_kind"] = kind
+                entry["latency_ms"] = int((_t.time() - started) * 1000)
+                attempts.append(entry)
+
+        return {
+            "symbol": symbol.upper(),
+            "interval": interval,
+            "period": period,
+            "chosen": chosen,
+            "bars_returned": chosen_df_rows,
+            "attempts": attempts,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # STATIC FILES
 # ═══════════════════════════════════════════════════════════════════════════════════
