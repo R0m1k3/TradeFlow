@@ -181,12 +181,45 @@ class TraderV2:
         if ai_action == "BUY" and ai_confidence is not None and ai_confidence >= 0.65:
             action_taken = "BUY"
             reason = f"IA BUY (conf={ai_confidence:.2f}) — decision autonome"
-        elif ai_action == "SELL" and ai_confidence is not None and ai_confidence >= 0.65:
+        elif ai_action == "SELL":
+            # IA dit SELL, quelle que soit la confiance → on n'entre PAS en LONG.
+            # On log un WARNING explicite pour qu'un opérateur puisse auditer
+            # pourquoi le bot n'a pas pris la position.
+            confidence_str = f"{ai_confidence:.2f}" if ai_confidence is not None else "N/A"
+            logger.warning(
+                "🚫 %s : IA SELL (conf=%s) — bot REFUSE d'ouvrir un LONG. "
+                "Rationale: %s",
+                symbol, confidence_str, ai_rationale[:120] if ai_rationale else "—",
+            )
             action_taken = "SKIP"
-            reason = f"IA SELL (conf={ai_confidence:.2f}) — pas d'entree"
+            reason = f"IA SELL (conf={confidence_str}) — pas d'entree LONG"
+        elif ai_action == "BUY" and ai_confidence is not None and ai_confidence < 0.65:
+            # IA dit BUY mais confiance trop faible — on skip
+            action_taken = "SKIP"
+            reason = f"IA BUY conf={ai_confidence:.2f} < 0.65 — seuil non atteint"
         else:
-            action_taken = "SKIP"
-            reason = f"IA {ai_action or 'N/A'} (conf={ai_confidence or 0:.2f}, score={ai_score or 'N/A'}) → SKIP — pas de signal clair"
+            # Pas de signal IA exploitable (None, ou HOLD, ou score manquant).
+            # Bug-fix : avant ce patch, le bot retombait silencieusement sur la
+            # technique et achetait. Maintenant, par défaut, on SKIP et on log
+            # clairement. Pour désactiver ce garde-fou (legacy v1 behaviour),
+            # mettre REQUIRE_AI_CONFIRMATION=false dans l'env du bot.
+            import os
+            require_ai = os.environ.get("REQUIRE_AI_CONFIRMATION", "true").lower() != "false"
+            if require_ai:
+                logger.warning(
+                    "🚫 %s : aucun signal IA exploitable (action=%s, conf=%s, score=%s) "
+                    "— bot REFUSE d'ouvrir une position sans confirmation IA. "
+                    "Pour override : REQUIRE_AI_CONFIRMATION=false",
+                    symbol, ai_action, ai_confidence, ai_score,
+                )
+                action_taken = "SKIP"
+                reason = (
+                    f"Pas de signal IA (action={ai_action}, score={ai_score}) — "
+                    "REQUIRE_AI_CONFIRMATION bloque l'entree"
+                )
+            else:
+                action_taken = "SKIP"
+                reason = f"IA {ai_action or 'N/A'} (conf={ai_confidence or 0:.2f}, score={ai_score or 'N/A'}) → SKIP — pas de signal clair"
 
         self._log_decision(symbol, action_taken, reason, ai_action=ai_action, ai_confidence=ai_confidence)
 

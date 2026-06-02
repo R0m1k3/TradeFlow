@@ -58,6 +58,10 @@ services:
       - BOT_INTERVAL=1d
       - BOT_DATA_PERIOD=1y
       - BOT_META_LABELER_PATH=data/meta_labeler.pkl
+      # Safety: refuse to open a LONG when ARIA says SELL or when no AI
+      # signal is available. Set to "false" to fall back to the legacy
+      # behaviour (trade on technicals alone).
+      - REQUIRE_AI_CONFIRMATION=true
       # v1 legacy (only if BOT_VERSION=v1)
       - BOT_POSITION_SIZE=0.95
     restart: unless-stopped
