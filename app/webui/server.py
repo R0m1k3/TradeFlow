@@ -1450,6 +1450,16 @@ def ai_analyze_all():
     return {"success": True, "message": f"Analyse ARIA lancée pour {len(tickers)} ticker(s)", "tickers": tickers}
 
 
+@app.get("/api/admin/resilience")
+def get_resilience_stats():
+    """Return the state of every registered resilience guard (for ops dashboards)."""
+    try:
+        from app.data.resilience_hook import all_stats
+        return {"guards": all_stats()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # STATIC FILES
 # ═══════════════════════════════════════════════════════════════════════════════════
