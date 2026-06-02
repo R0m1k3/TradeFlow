@@ -85,15 +85,31 @@ class SourceRouter:
         period: str = "3mo",
         *,
         prefer: list[str] | None = None,
+        keys: dict[str, str] | None = None,
     ) -> FetchResult:
-        """Try each provider in priority order. Return the first success."""
+        """Try each provider in priority order. Return the first success.
+
+        `keys` is an optional dict {provider_name: api_key} that overrides
+        the per-provider env-var key for this single call (BYO-key pattern).
+        Pass `None` to fall back to env-var keys.
+        """
         started = time.time()
         order = prefer or self._priority
         tried: list[str] = []
+        keys = keys or {}
 
         for name in order:
             provider = self._providers.get(name)
-            if provider is None or not provider.is_available():
+            if provider is None:
+                continue
+
+            # Inject per-request key (if any), then check availability
+            if name in keys and keys[name]:
+                provider.set_request_key(keys[name])
+            else:
+                provider.clear_request_key()
+
+            if not provider.is_available():
                 continue
 
             guard = for_source(name)
@@ -144,15 +160,23 @@ class SourceRouter:
         symbol: str,
         *,
         prefer: list[str] | None = None,
+        keys: dict[str, str] | None = None,
     ) -> FetchResult:
-        """Like fetch_ohlcv but returns the current price."""
+        """Like fetch_ohlcv but returns the current price. Accepts `keys`."""
         started = time.time()
         order = prefer or self._priority
         tried: list[str] = []
+        keys = keys or {}
 
         for name in order:
             provider = self._providers.get(name)
-            if provider is None or not provider.is_available():
+            if provider is None:
+                continue
+            if name in keys and keys[name]:
+                provider.set_request_key(keys[name])
+            else:
+                provider.clear_request_key()
+            if not provider.is_available():
                 continue
 
             guard = for_source(name)
@@ -183,6 +207,14 @@ class SourceRouter:
 
         duration_ms = int((time.time() - started) * 1000)
         return FetchResult(df=None, source="", tried=tried, duration_ms=duration_ms)
+
+    def set_request_keys(self, keys: dict[str, str]) -> None:
+        """Inject per-request keys into all known providers at once."""
+        for name, provider in self._providers.items():
+            if name in keys and keys[name]:
+                provider.set_request_key(keys[name])
+            else:
+                provider.clear_request_key()
 
     def stats(self) -> dict:
         return {

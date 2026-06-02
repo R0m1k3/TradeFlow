@@ -36,10 +36,11 @@ class TwelveDataProvider(BaseProvider):
     name = "twelve_data"
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("TWELVE_DATA_API_KEY", "")
+        super().__init__()
+        self._static_key = api_key if api_key is not None else (os.environ.get("TWELVE_DATA_API_KEY", "") or "")
 
     def is_available(self) -> bool:
-        return bool(self._api_key)
+        return bool(self._key())
 
     def coverage(self) -> dict:
         return {
@@ -90,7 +91,7 @@ class TwelveDataProvider(BaseProvider):
                         "symbol": self._resolve(symbol),
                         "interval": INTERVAL_MAP[interval],
                         "outputsize": 5000,
-                        "apikey": self._api_key,
+                        "apikey": self._key(),
                     },
                 )
                 self._check(r)
@@ -130,7 +131,7 @@ class TwelveDataProvider(BaseProvider):
             with httpx.Client(timeout=10) as client:
                 r = client.get(
                     f"{ENDPOINT}/quote",
-                    params={"symbol": self._resolve(symbol), "apikey": self._api_key},
+                    params={"symbol": self._resolve(symbol), "apikey": self._key()},
                 )
                 self._check(r)
                 data = r.json()

@@ -44,6 +44,48 @@ class BaseProvider(ABC):
 
     name: str = "base"
 
+    def __init__(self) -> None:
+        # Per-request API key (BYO-key override). Setter: set_request_key().
+        # If empty, falls back to SettingsStore → env var.
+        self._request_key: str = ""
+
+    def set_request_key(self, key: str) -> None:
+        """Inject a per-request API key. Used by the BYO-key pattern
+        (the request header `X-Provider-Key-<Name>` is forwarded here).
+
+        The key lives only for the lifetime of the current request —
+        the backend should call this on every inbound HTTP request.
+        """
+        self._request_key = (key or "").strip()
+
+    def clear_request_key(self) -> None:
+        """Remove any per-request key."""
+        self._request_key = ""
+
+    def _key(self) -> str:
+        """Return the effective API key.
+
+        Resolution order:
+            1. per-request key (set via set_request_key)
+            2. SettingsStore (data/settings.json / Postgres in production)
+            3. constructor arg + env var (operator-configured fallback)
+        """
+        if self._request_key:
+            return self._request_key
+        # Try the persistent store
+        try:
+            from app.data.settings_store import get_store
+            v = get_store().get_provider_key(self.name, request_key="")
+            if v:
+                return v
+        except Exception:
+            pass
+        return self._constructor_key()
+
+    def _constructor_key(self) -> str:
+        """Return the key passed at construction time (or env-var)."""
+        return getattr(self, "_static_key", "")
+
     @abstractmethod
     def is_available(self) -> bool:
         """True if the provider is configured (API key, etc.) and ready to call."""

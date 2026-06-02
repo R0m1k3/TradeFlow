@@ -37,10 +37,11 @@ class AlphaVantageProvider(BaseProvider):
     name = "alpha_vantage"
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("ALPHA_VANTAGE_API_KEY", "")
+        super().__init__()
+        self._static_key = api_key if api_key is not None else (os.environ.get("ALPHA_VANTAGE_API_KEY", "") or "")
 
     def is_available(self) -> bool:
-        return bool(self._api_key)
+        return bool(self._key())
 
     def coverage(self) -> dict:
         return {
@@ -63,7 +64,7 @@ class AlphaVantageProvider(BaseProvider):
                 "symbol": symbol,
                 "interval": INTERVAL_MAP[interval],
                 "outputsize": "full" if _period_to_count(period) > 100 else "compact",
-                "apikey": self._api_key,
+                "apikey": self._key(),
             }
             ts_key = f"Time Series ({INTERVAL_MAP[interval]})"
         else:
@@ -71,7 +72,7 @@ class AlphaVantageProvider(BaseProvider):
                 "function": "TIME_SERIES_DAILY",
                 "symbol": symbol,
                 "outputsize": "full",
-                "apikey": self._api_key,
+                "apikey": self._key(),
             }
             ts_key = "Time Series (Daily)"
 
@@ -123,7 +124,7 @@ class AlphaVantageProvider(BaseProvider):
                 r = client.get(ENDPOINT, params={
                     "function": "GLOBAL_QUOTE",
                     "symbol": symbol,
-                    "apikey": self._api_key,
+                    "apikey": self._key(),
                 })
                 self._check(r)
                 data = r.json()

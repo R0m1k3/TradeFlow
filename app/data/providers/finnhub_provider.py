@@ -31,10 +31,13 @@ class FinnhubProvider(BaseProvider):
     name = "finnhub"
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("FINNHUB_API_KEY", "")
+        super().__init__()
+        # If no explicit key, read from env at construction; the SettingsStore
+        # takes priority at lookup time (see BaseProvider._key()).
+        self._static_key = api_key if api_key is not None else (os.environ.get("FINNHUB_API_KEY", "") or "")
 
     def is_available(self) -> bool:
-        return bool(self._api_key)
+        return bool(self._key())
 
     def coverage(self) -> dict:
         return {
@@ -72,7 +75,7 @@ class FinnhubProvider(BaseProvider):
                         "from": from_ts,
                         "to": now,
                     },
-                    headers={"X-Finnhub-Token": self._api_key},
+                    headers={"X-Finnhub-Token": self._key()},
                 )
                 self._check(r)
                 data = r.json()
@@ -106,7 +109,7 @@ class FinnhubProvider(BaseProvider):
                 r = client.get(
                     f"{ENDPOINT}/quote",
                     params={"symbol": self._resolve(symbol)},
-                    headers={"X-Finnhub-Token": self._api_key},
+                    headers={"X-Finnhub-Token": self._key()},
                 )
                 self._check(r)
                 data = r.json()

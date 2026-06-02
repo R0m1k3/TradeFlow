@@ -135,6 +135,15 @@ def _read_env_key(name: str) -> str:
     return ""
 
 
+def _key_canonical(provider: str) -> str:
+    """Map a friendly provider name to the canonical env/DB key name."""
+    return {
+        "finnhub": "FINNHUB_API_KEY",
+        "twelve_data": "TWELVE_DATA_API_KEY",
+        "alpha_vantage": "ALPHA_VANTAGE_API_KEY",
+    }.get(provider, f"{provider.upper()}_API_KEY")
+
+
 def _write_env_key(name: str, value: str) -> None:
     """Persist a key to settings.json (Docker-safe) and .env (local dev)."""
     settings = _load_settings()
@@ -523,8 +532,13 @@ def get_config():
         get_minimax_key,
         get_openrouter_key,
     )
+    from app.data.settings_store import get_store
+    store = get_store()
     minimax_key = get_minimax_key()
     openrouter_key = get_openrouter_key()
+    finnhub_key = store.get_provider_key("finnhub")
+    twelve_data_key = store.get_provider_key("twelve_data")
+    alpha_vantage_key = store.get_provider_key("alpha_vantage")
 
     provider = ai.get("provider", "auto")
     # Show the configured key hint for the *active* provider first
@@ -563,6 +577,21 @@ def get_config():
         "ai_openrouter_key_configured": bool(openrouter_key),
         "ai_key_configured": bool(active_key),
         "ai_key_hint": f"{active_key[:8]}••••" if active_key else "",
+        # Data provider keys (BYO-key / DB-stored)
+        "data_finnhub_key_configured": bool(finnhub_key),
+        "data_twelve_data_key_configured": bool(twelve_data_key),
+        "data_alpha_vantage_key_configured": bool(alpha_vantage_key),
+    }
+
+
+def _resolve_all_data_provider_keys() -> dict:
+    """Resolve the configured state of all data provider keys (DB or env)."""
+    from app.data.settings_store import get_store
+    store = get_store()
+    return {
+        "finnhub": store.is_provider_configured("finnhub"),
+        "twelve_data": store.is_provider_configured("twelve_data"),
+        "alpha_vantage": store.is_provider_configured("alpha_vantage"),
     }
 
 
@@ -648,6 +677,18 @@ def save_config(body: dict = Body(default={})):
                 _write_env_key("ANTHROPIC_AUTH_TOKEN", key)
             else:
                 _write_env_key("OPENROUTER_API_KEY", key)
+
+        # Data provider keys (Finnhub / Twelve Data / Alpha Vantage)
+        # Persisted in the SettingsStore (DB in production, JSON file in Python).
+        from app.data.settings_store import get_store
+        store = get_store()
+        for prov_name, key_name in [
+            ("finnhub", "data_finnhub_key"),
+            ("twelve_data", "data_twelve_data_key"),
+            ("alpha_vantage", "data_alpha_vantage_key"),
+        ]:
+            if key_name in body:
+                store.set(_key_canonical(prov_name), str(body[key_name] or ""))
 
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
@@ -1465,9 +1506,10 @@ def get_provider_stats():
     """Return per-provider availability, coverage, and live resilience stats.
 
     Designed to feed the /admin/providers dashboard. Each entry includes:
-      * available : True if the API key is configured
+      * available : True if the API key is configured (in DB or env)
       * coverage  : markets / intervals / intraday flag
       * resilience: live circuit-breaker, negative-cache, backoff counters
+      * key_source: "store" (DB/JSON), "env", "request_header", or "none"
     """
     try:
         from app.data.source_router import SourceRouter
@@ -1476,7 +1518,9 @@ def get_provider_stats():
         from app.data.providers.twelve_data_provider import TwelveDataProvider
         from app.data.providers.alpha_vantage_provider import AlphaVantageProvider
         from app.data.providers.yahoo_provider import YahooProvider
+        from app.data.settings_store import get_store, PROVIDER_KEYS
 
+        store = get_store()
         providers = [
             FinnhubProvider(),
             TwelveDataProvider(),
@@ -1486,9 +1530,20 @@ def get_provider_stats():
         out = []
         for p in providers:
             guard = for_source(p.name)
+            # Determine where the key comes from
+            canonical = PROVIDER_KEYS.get(p.name, f"{p.name.upper()}_API_KEY")
+            if p.name == "yahoo":
+                key_source = "always_available"
+            elif store.has(canonical):
+                key_source = "store"
+            elif os.environ.get(canonical):
+                key_source = "env"
+            else:
+                key_source = "none"
             entry = {
                 "name": p.name,
                 "available": p.is_available(),
+                "key_source": key_source,
                 "coverage": p.coverage(),
                 "resilience": guard.stats(),
             }
@@ -1503,17 +1558,18 @@ def test_source_chain(
     symbol: str = Query(..., description="Ticker to test (e.g. AAPL, ROG.SW, MC.PA)"),
     interval: str = Query("1d", description="Bar interval"),
     period: str = Query("3mo", description="Lookback period"),
+    request_keys_only: bool = Query(False, description="Use only keys from request headers (ignore env)"),
 ):
     """Run the full source chain for a ticker and report which provider answered.
 
-    Returns the chosen source, latency, and a per-source breakdown showing
-    which ones were tried and why each failed (if any). Useful for debugging
-    "why is this ticker stuck on Yahoo when Twelve Data has the key configured?"
+    Supports BYO-key: if the request includes `X-Provider-Key-Finnhub` /
+    `X-Provider-Key-TwelveData` / `X-Provider-Key-AlphaVantage` headers,
+    those are used for this request. Otherwise falls back to env vars.
     """
     try:
         from app.data.source_router import SourceRouter
-        from app.data.resilience_hook import for_source
-        from app.data.resilience_hook import classify_exception
+        from app.data.resilience_hook import for_source, classify_exception
+        from app.data.request_keys import get_all_provider_keys
         from app.data.providers.finnhub_provider import FinnhubProvider
         from app.data.providers.twelve_data_provider import TwelveDataProvider
         from app.data.providers.alpha_vantage_provider import AlphaVantageProvider
@@ -1528,15 +1584,26 @@ def test_source_chain(
         }
         priority = ["finnhub", "twelve_data", "alpha_vantage", "yahoo"]
 
+        # Resolve keys from request headers
+        headers = dict(request.headers.items()) if hasattr(request, "headers") else {}
+        all_keys = get_all_provider_keys(headers)
+
         attempts = []
         chosen = None
         chosen_df_rows = 0
 
         for name in priority:
             p = providers[name]
+            # Inject the per-request key (or clear it)
+            if all_keys.get(name):
+                p.set_request_key(all_keys[name])
+            else:
+                p.clear_request_key()
+
             entry = {
                 "source": name,
                 "available": p.is_available(),
+                "used_request_key": bool(all_keys.get(name)),
                 "attempted": False,
                 "succeeded": False,
                 "skipped_reason": None,

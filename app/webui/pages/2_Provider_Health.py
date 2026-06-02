@@ -132,6 +132,33 @@ st.dataframe(df_cov, use_container_width=True)
 st.subheader("Test live d'une chaîne")
 st.caption("Lance `SourceRouter.fetch_ohlcv()` pour un ticker donné et affiche la source qui a répondu.")
 
+# Settings: input + save provider keys to the DB-backed SettingsStore
+with st.expander("🔑 Clés API (stockées dans `data/settings.json` — persistent)", expanded=False):
+    st.caption("Les clés sont sauvegardées via `/api/config` et persistent après restart. Une fois entrées, l'app les utilise automatiquement à chaque appel.")
+    col_k1, col_k2, col_k3 = st.columns(3)
+    with col_k1:
+        k_finnhub = st.text_input("Finnhub", value="", type="password",
+                                   key="k_finnhub", placeholder="d7lu8...")
+    with col_k2:
+        k_twelve = st.text_input("Twelve Data", value="", type="password",
+                                  key="k_twelve", placeholder="xxx")
+    with col_k3:
+        k_av = st.text_input("Alpha Vantage", value="", type="password",
+                              key="k_av", placeholder="yyy")
+
+    if st.button("💾 Sauvegarder les clés", key="save_keys"):
+        body = {
+            "data_finnhub_key": k_finnhub or "",
+            "data_twelve_data_key": k_twelve or "",
+            "data_alpha_vantage_key": k_av or "",
+        }
+        try:
+            r = requests.post("http://localhost:8501/api/config", json=body, timeout=5)
+            r.raise_for_status()
+            st.success("Clés sauvegardées. Recharge la page pour voir l'effet.")
+        except Exception as exc:
+            st.error(f"Erreur: {exc}")
+
 col1, col2, col3 = st.columns([3, 2, 2])
 with col1:
     test_symbol = st.text_input("Symbole", value="ROG.SW", placeholder="ex: AAPL, ROG.SW, MC.PA, NESN.SW")
@@ -164,7 +191,6 @@ if st.button("🚀 Tester la chaîne", type="primary"):
             else:
                 st.error(f"❌ Aucune source n'a pu fournir {test_symbol}. Détail ci-dessous.")
 
-            # Detailed table
             rows = []
             for a in attempts:
                 rows.append({
