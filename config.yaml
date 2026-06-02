@@ -72,3 +72,19 @@ live_trading:
   initial_capital: 10000
   position_size: 0.95
   # Tick interval is set via BOT_TICK_SECONDS env var in docker-compose.yml
+
+# ── Data Sources (multi-provider fallback chain) ─────────────────────────────
+# The SourceRouter tries each provider in priority order. A failure on one
+# (timeout, 5xx, 404, rate limit) triggers the next one. Backoff and
+# circuit-breaker logic (see app/data/resilience_hook.py) prevents hammering
+# dead endpoints.
+data_sources:
+  enabled_providers:                 # providers in priority order (first wins)
+    - finnhub                        # 60 calls/min, US+EU+Asia, free
+    - twelve_data                    # 800 calls/day, best EU coverage (incl. .SW/.DE)
+    - alpha_vantage                  # 25 calls/day, US+EU, last-resort free
+    - yahoo                          # unlimited, but unreliable — final fallback
+  # API keys are read from .env / settings.json:
+  #   FINNHUB_API_KEY
+  #   TWELVE_DATA_API_KEY
+  #   ALPHA_VANTAGE_API_KEY
