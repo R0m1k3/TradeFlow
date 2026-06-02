@@ -21,6 +21,8 @@ data/bot.pid
 data/bot.log
 data/stock_names.json
 data/settings.json
+data/ai_cache/
+data/aria_portfolio.json
 
 # Environment variables
 .env

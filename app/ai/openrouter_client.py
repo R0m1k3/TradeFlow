@@ -1,32 +1,23 @@
-"""OpenRouter API client — fetches an AI sentiment score for a ticker."""
+"""OpenRouter API client — kept as a thin compatibility shim.
+
+The heavy lifting now lives in `app.ai.provider`. This module re-exports the
+historical names so existing imports keep working, while routing through the
+unified client (which adds caching, retries, and provider-agnostic parsing).
+"""
+from __future__ import annotations
+
 import json
 import logging
+from datetime import datetime
+
 import httpx
+
+from app.ai import provider as _provider
 
 logger = logging.getLogger(__name__)
 
-ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
-MODELS_ENDPOINT = "https://openrouter.ai/api/v1/models"
-
-
-def fetch_models(api_key: str = "", timeout: int = 10) -> list[str]:
-    """Return sorted list of model IDs available on OpenRouter.
-
-    Works without an API key (public endpoint) but the key improves rate limits.
-    Returns an empty list on error.
-    """
-    headers = {"HTTP-Referer": "https://tradeflow.local", "X-Title": "TradeFlow"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            r = client.get(MODELS_ENDPOINT, headers=headers)
-            r.raise_for_status()
-        models = r.json().get("data", [])
-        return sorted(m["id"] for m in models if "id" in m)
-    except Exception as exc:
-        logger.warning("Could not fetch OpenRouter model list: %s", exc)
-        return []
+ENDPOINT = _provider.OPENROUTER_ENDPOINT
+MODELS_ENDPOINT = _provider.OPENROUTER_MODELS_ENDPOINT
 
 PROMPT_TEMPLATE = """\
 Ticker boursier : {ticker}
@@ -55,51 +46,52 @@ avec URLs directes quand disponibles.
 """
 
 
+def fetch_models(api_key: str = "", timeout: int = 10) -> list[str]:
+    """Return sorted list of model IDs available on OpenRouter."""
+    return _provider.list_openrouter_models(api_key=api_key, timeout=timeout)
+
+
 async def fetch_ai_score(
     ticker: str,
     model: str,
     api_key: str,
     timeout: int = 30,
 ) -> tuple[float, str, list]:
-    """Return (score 0-1, rationale, sources). Raises on error."""
-    from datetime import datetime
+    """Backwards-compatible async helper. Returns (score, rationale, sources)."""
+    from app.ai.provider import AIConfig
+    cfg = AIConfig(
+        provider="openrouter",
+        model=model,
+        api_key=api_key,
+        timeout_seconds=timeout,
+        cache_ttl_seconds=0,  # don't cache async helper calls — caller decides
+    )
     prompt = PROMPT_TEMPLATE.format(ticker=ticker, date=datetime.now().strftime("%Y-%m-%d %H:%M"))
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            ENDPOINT,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://tradeflow.local",
-                "X-Title": "TradeFlow",
-            },
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        response.raise_for_status()
-
-    content = response.json()["choices"][0]["message"]["content"]
-    data = json.loads(content)
-    score = float(data["score"])
+    try:
+        result = await _call_async(prompt, cfg)
+    except Exception:
+        # Fallback: keep historical behaviour — raise on error
+        raise
+    parsed = result.get("json") or {}
+    score = float(parsed.get("score", 0.5))
     score = max(0.0, min(1.0, score))
-    rationale = data.get("rationale", "")
-    sources = data.get("sources", [])
+    rationale = parsed.get("rationale", "") or ""
+    sources = parsed.get("sources") or []
     if not isinstance(sources, list):
         sources = []
     return score, rationale, sources
 
 
+async def _call_async(prompt: str, cfg) -> dict:
+    """Run the unified provider in a thread so it doesn't block the event loop."""
+    import asyncio
+    return await asyncio.to_thread(_provider.call_ai, prompt, mode="hybrid", cfg=cfg)
+
+
 async def test_connection(api_key: str, model: str, timeout: int = 15) -> bool:
-    """Quick connectivity check. Returns True if the API responds correctly."""
-    try:
-        score, _r, _s = await fetch_ai_score("AAPL", model, api_key, timeout=timeout)
-        return 0.0 <= score <= 1.0
-    except Exception as exc:
-        logger.warning("OpenRouter connection test failed: %s", exc)
-        return False
+    """Quick connectivity check (legacy signature). Returns True if OK."""
+    res = _provider.test_connection("openrouter", api_key, model=model, timeout=timeout)
+    return bool(res.get("ok"))
 
 
 AUTONOMOUS_PROMPT_TEMPLATE = """\

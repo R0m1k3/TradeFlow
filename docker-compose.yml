@@ -14,6 +14,8 @@ services:
       - PYTHONUNBUFFERED=1
       - FINNHUB_API_KEY=${FINNHUB_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY:-}
     restart: unless-stopped
     networks:
       - nginx_default

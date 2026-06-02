@@ -2329,9 +2329,16 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
   const [ariaCapital, setAriaCapital] = useState(10000);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiMode, setAiMode] = useState('hybrid');
+  const [aiProvider, setAiProvider] = useState('auto');
   const [aiModel, setAiModel] = useState('perplexity/sonar');
+  const [aiMinimaxModel, setAiMinimaxModel] = useState('MiniMax-M3');
+  const [aiOpenrouterModel, setAiOpenrouterModel] = useState('perplexity/sonar');
   const [aiKey, setAiKey] = useState('');
+  const [aiMinimaxKey, setAiMinimaxKey] = useState('');
+  const [aiOpenrouterKey, setAiOpenrouterKey] = useState('');
   const [aiKeyHint, setAiKeyHint] = useState('');
+  const [aiMinimaxKeyHint, setAiMinimaxKeyHint] = useState('');
+  const [aiOpenrouterKeyHint, setAiOpenrouterKeyHint] = useState('');
   const [aiWeight, setAiWeight] = useState(0.3);
   const [aiModels, setAiModels] = useState([]);
   const [aiModelsLoading, setAiModelsLoading] = useState(false);
@@ -2353,16 +2360,21 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
         setNotifications(cfg.notifications !== false);
         setAiEnabled(cfg.ai_enabled || false);
         setAiMode(cfg.ai_mode || 'hybrid');
-        setAiModel(cfg.ai_model || 'perplexity/sonar');
+        setAiProvider(cfg.ai_provider || 'auto');
+        setAiModel(cfg.ai_model || '');
+        setAiMinimaxModel(cfg.ai_minimax_model || 'MiniMax-M3');
+        setAiOpenrouterModel(cfg.ai_openrouter_model || 'perplexity/sonar');
         setAiWeight(cfg.ai_score_weight ?? 0.3);
         setAiKeyHint(cfg.ai_key_hint || '');
+        if (cfg.ai_minimax_key_configured) setAiMinimaxKeyHint('••••••••');
+        if (cfg.ai_openrouter_key_configured) setAiOpenrouterKeyHint('••••••••');
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
 
-    // Fetch model list independently (may take a moment)
+    // Fetch model list for OpenRouter only (Minimax has fixed set)
     setAiModelsLoading(true);
-    apiFetch('/api/ai/models')
+    apiFetch('/api/ai/models?provider=openrouter')
       .then(data => setAiModels(data.models || []))
       .catch(() => setAiModels([]))
       .finally(() => setAiModelsLoading(false));
@@ -2371,14 +2383,21 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
   const handleTestConnection = async () => {
     setAiTestState('loading');
     setAiTestMsg('');
+    const providerToTest = aiProvider === 'minimax' ? 'minimax'
+                          : aiProvider === 'openrouter' ? 'openrouter'
+                          : (aiMinimaxKey || aiMinimaxKeyHint ? 'minimax' : 'openrouter');
+    const keyToTest = providerToTest === 'minimax'
+      ? (aiMinimaxKey || aiKey)
+      : (aiOpenrouterKey || aiKey);
+    const modelToTest = providerToTest === 'minimax' ? aiMinimaxModel : aiOpenrouterModel;
     try {
       const res = await apiFetch('/api/ai/test', {
         method: 'POST',
-        body: JSON.stringify({ api_key: aiKey, model: aiModel }),
+        body: JSON.stringify({ provider: providerToTest, api_key: keyToTest, model: modelToTest }),
       });
-      if (res.success) {
+      if (res.ok) {
         setAiTestState('ok');
-        setAiTestMsg(`Connexion réussie — ${res.model}`);
+        setAiTestMsg(`Connexion réussie — ${res.provider}/${res.model}`);
       } else {
         setAiTestState('error');
         setAiTestMsg(res.error || 'Échec de connexion');
@@ -2398,11 +2417,18 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
           capital: algoCapital, algo_capital: algoCapital, aria_capital: ariaCapital,
           strategy, max_positions: maxPos, min_score: minScore,
           auto_buy: autoBuy, auto_sell: autoSell, notifications,
-          ai_enabled: aiEnabled, ai_mode: aiMode, ai_model: aiModel, ai_score_weight: aiWeight,
-          ai_key: aiKey || undefined,
+          ai_enabled: aiEnabled, ai_mode: aiMode,
+          ai_provider: aiProvider,
+          ai_model: '',
+          ai_minimax_model: aiMinimaxModel,
+          ai_openrouter_model: aiOpenrouterModel,
+          ai_score_weight: aiWeight,
+          ai_minimax_key: aiMinimaxKey || undefined,
+          ai_openrouter_key: aiOpenrouterKey || undefined,
         }),
       });
-      if (aiKey) { setAiKeyHint(aiKey.substring(0, 8) + '••••'); setAiKey(''); }
+      if (aiMinimaxKey) { setAiMinimaxKeyHint('••••••••'); setAiMinimaxKey(''); }
+      if (aiOpenrouterKey) { setAiOpenrouterKeyHint('••••••••'); setAiOpenrouterKey(''); }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) { alert('Erreur: ' + e.message); }
@@ -2583,72 +2609,122 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
           </div>
 
           {aiEnabled && (
-            <div style={{ marginBottom: 8 }}>
-              <div className="field-label" style={{ marginBottom: 8 }}>Mode IA</div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                {[
-                  { val: 'hybrid', label: 'Hybride', desc: "Score 0–1 qui enrichit l'algorithme" },
-                  { val: 'autonomous', label: 'Agent autonome', desc: "L'IA décide seule (ARIA)" },
-                ].map(opt => (
-                  <div
-                    key={opt.val}
-                    onClick={() => setAiMode(opt.val)}
-                    style={{
-                      flex: 1, padding: '12px 14px', borderRadius: 12, cursor: 'pointer',
-                      border: `2px solid ${aiMode === opt.val ? 'var(--accent)' : 'var(--hairline-strong)'}`,
-                      background: aiMode === opt.val ? 'var(--accent-soft)' : 'var(--bg-tint)',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: 13, color: aiMode === opt.val ? 'var(--accent)' : 'var(--fg)' }}>{opt.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 3 }}>{opt.desc}</div>
-                  </div>
-                ))}
-              </div>
-              {aiMode === 'autonomous' && (
-                <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(90,255,140,0.07)', borderRadius: 10, borderLeft: '3px solid var(--accent)', fontSize: 12, color: 'var(--fg-2)' }}>
-                  En mode Agent autonome, ARIA analyse chaque ticker et prend ses propres décisions — BUY, SELL ou HOLD — avec position size, stop-loss et take-profit. L'algorithme traditionnel est contourné.
+            <>
+              <div style={{ marginBottom: 8 }}>
+                <div className="field-label" style={{ marginBottom: 8 }}>Provider IA</div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {[
+                    { val: 'auto', label: 'Auto', desc: 'Minimax d\'abord, OpenRouter en secours' },
+                    { val: 'minimax', label: 'Minimax M3', desc: 'Agent interne ultra-efficace' },
+                    { val: 'openrouter', label: 'OpenRouter', desc: 'Multi-modèles (perplexity, etc.)' },
+                  ].map(opt => (
+                    <div
+                      key={opt.val}
+                      onClick={() => setAiProvider(opt.val)}
+                      style={{
+                        flex: 1, padding: '10px 12px', borderRadius: 12, cursor: 'pointer',
+                        border: `2px solid ${aiProvider === opt.val ? 'var(--accent)' : 'var(--hairline-strong)'}`,
+                        background: aiProvider === opt.val ? 'var(--accent-soft)' : 'var(--bg-tint)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: 13, color: aiProvider === opt.val ? 'var(--accent)' : 'var(--fg)' }}>{opt.label}</div>
+                      <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 3 }}>{opt.desc}</div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
+
+              <div style={{ marginBottom: 8 }}>
+                <div className="field-label" style={{ marginBottom: 8 }}>Mode IA</div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {[
+                    { val: 'hybrid', label: 'Hybride', desc: "Score 0–1 qui enrichit l'algorithme" },
+                    { val: 'autonomous', label: 'Agent autonome', desc: "L'IA décide seule (ARIA)" },
+                  ].map(opt => (
+                    <div
+                      key={opt.val}
+                      onClick={() => setAiMode(opt.val)}
+                      style={{
+                        flex: 1, padding: '12px 14px', borderRadius: 12, cursor: 'pointer',
+                        border: `2px solid ${aiMode === opt.val ? 'var(--accent)' : 'var(--hairline-strong)'}`,
+                        background: aiMode === opt.val ? 'var(--accent-soft)' : 'var(--bg-tint)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: 13, color: aiMode === opt.val ? 'var(--accent)' : 'var(--fg)' }}>{opt.label}</div>
+                      <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 3 }}>{opt.desc}</div>
+                    </div>
+                  ))}
+                </div>
+                {aiMode === 'autonomous' && (
+                  <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(90,255,140,0.07)', borderRadius: 10, borderLeft: '3px solid var(--accent)', fontSize: 12, color: 'var(--fg-2)' }}>
+                    En mode Agent autonome, ARIA analyse chaque ticker et prend ses propres décisions — BUY, SELL ou HOLD — avec position size, stop-loss et take-profit. L'algorithme traditionnel est contourné.
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {aiEnabled && (aiProvider === 'minimax' || aiProvider === 'auto') && (
+            <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+              <div className="field-label">Clé API Minimax</div>
+              {aiMinimaxKeyHint && <div className="field-hint" style={{ marginBottom: 4 }}>Clé actuelle : {aiMinimaxKeyHint}</div>}
+              <input
+                type="password"
+                placeholder="sk-cp-..."
+                value={aiMinimaxKey}
+                onChange={e => setAiMinimaxKey(e.target.value)}
+                style={{
+                  width: '100%', background: 'var(--bg-tint)', border: '1px solid var(--hairline-strong)',
+                  borderRadius: 8, padding: '8px 12px', color: 'var(--fg)', fontSize: 13,
+                  fontFamily: 'monospace', outline: 'none',
+                }}
+              />
+              <div className="field-hint">Modèle : <b>{aiMinimaxModel}</b> (Anthropic-compatible)</div>
             </div>
           )}
 
-          <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-            <div className="field-label">Clé API OpenRouter</div>
-            {aiKeyHint && <div className="field-hint" style={{ marginBottom: 4 }}>Clé actuelle : {aiKeyHint}</div>}
-            <input
-              type="password"
-              placeholder="sk-or-v1-..."
-              value={aiKey}
-              onChange={e => setAiKey(e.target.value)}
-              style={{
-                width: '100%', background: 'var(--bg-tint)', border: '1px solid var(--hairline-strong)',
-                borderRadius: 8, padding: '8px 12px', color: 'var(--fg)', fontSize: 13,
-                fontFamily: 'monospace', outline: 'none',
-              }}
-            />
-          </div>
-
-          <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-            <div className="field-label">Modèle IA</div>
-            {aiModelsLoading
-              ? <div className="field-hint">Chargement des modèles...</div>
-              : <select
-                  value={aiModel}
-                  onChange={e => setAiModel(e.target.value)}
+          {aiEnabled && (aiProvider === 'openrouter' || aiProvider === 'auto') && (
+            <>
+              <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                <div className="field-label">Clé API OpenRouter</div>
+                {aiOpenrouterKeyHint && <div className="field-hint" style={{ marginBottom: 4 }}>Clé actuelle : {aiOpenrouterKeyHint}</div>}
+                <input
+                  type="password"
+                  placeholder="sk-or-v1-..."
+                  value={aiOpenrouterKey}
+                  onChange={e => setAiOpenrouterKey(e.target.value)}
                   style={{
                     width: '100%', background: 'var(--bg-tint)', border: '1px solid var(--hairline-strong)',
-                    borderRadius: 8, padding: '8px 12px', color: 'var(--fg)', fontSize: 13, outline: 'none',
+                    borderRadius: 8, padding: '8px 12px', color: 'var(--fg)', fontSize: 13,
+                    fontFamily: 'monospace', outline: 'none',
                   }}
-                >
-                  {aiModels.length === 0
-                    ? <option value={aiModel}>{aiModel}</option>
-                    : aiModels.map(m => <option key={m} value={m}>{m}</option>)
-                  }
-                </select>
-            }
-            <div className="field-hint">{aiModels.length > 0 ? `${aiModels.length} modèles disponibles` : 'Entrez votre clé API pour charger la liste complète'}</div>
-          </div>
+                />
+              </div>
+
+              <div className="field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                <div className="field-label">Modèle OpenRouter</div>
+                {aiModelsLoading
+                  ? <div className="field-hint">Chargement des modèles...</div>
+                  : <select
+                      value={aiOpenrouterModel}
+                      onChange={e => setAiOpenrouterModel(e.target.value)}
+                      style={{
+                        width: '100%', background: 'var(--bg-tint)', border: '1px solid var(--hairline-strong)',
+                        borderRadius: 8, padding: '8px 12px', color: 'var(--fg)', fontSize: 13, outline: 'none',
+                      }}
+                    >
+                      {aiModels.length === 0
+                        ? <option value={aiOpenrouterModel}>{aiOpenrouterModel}</option>
+                        : aiModels.map(m => <option key={m} value={m}>{m}</option>)
+                      }
+                    </select>
+                }
+                <div className="field-hint">{aiModels.length > 0 ? `${aiModels.length} modèles disponibles` : 'Entrez votre clé API pour charger la liste complète'}</div>
+              </div>
+            </>
+          )}
 
           {aiMode === 'hybrid' && (
             <div className="field">
@@ -2705,10 +2781,24 @@ function ConfigScreen({ onBack, botActive, setBotActive }) {
             </div>
           </div>
           {aiEnabled && (
-            <div className="field">
-              <div className="field-label">Modèle</div>
-              <div style={{ color: 'var(--fg)', fontWeight: 500, fontSize: 12, wordBreak: 'break-all' }}>{aiModel}</div>
-            </div>
+            <>
+              <div className="field">
+                <div className="field-label">Provider</div>
+                <div style={{ color: 'var(--fg)', fontWeight: 500 }}>
+                  {aiProvider === 'minimax' && 'Minimax M3'}
+                  {aiProvider === 'openrouter' && 'OpenRouter'}
+                  {aiProvider === 'auto' && 'Auto (Minimax d\'abord)'}
+                </div>
+              </div>
+              <div className="field">
+                <div className="field-label">Modèle</div>
+                <div style={{ color: 'var(--fg)', fontWeight: 500, fontSize: 12, wordBreak: 'break-all' }}>
+                  {aiProvider === 'minimax' && aiMinimaxModel}
+                  {aiProvider === 'openrouter' && aiOpenrouterModel}
+                  {aiProvider === 'auto' && `${aiMinimaxModel} → ${aiOpenrouterModel}`}
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>

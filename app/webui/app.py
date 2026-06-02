@@ -25,6 +25,7 @@ from streamlit_autorefresh import st_autorefresh
 from app.ai import scheduler as ai_scheduler
 from app.ai import score_store
 from app.ai.openrouter_client import fetch_models, test_connection
+from app.ai.provider import test_connection as test_provider_connection
 from app.ai.persist import get_all_latest_ai_signals
 from app.analysis.composite import compute_composite_score
 from app.bot.live_trader import get_active_live_session, stop_live_session, resume_or_create_live_session
@@ -81,12 +82,31 @@ def _save_config(cfg: dict) -> None:
         yaml.dump(cfg, f, allow_unicode=True)
 
 
+_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "data" / "settings.json"
+
+
 def _read_env_key(name: str) -> str:
-    if not _ENV_PATH.exists():
-        return ""
-    for line in _ENV_PATH.read_text(encoding="utf-8").splitlines():
-        if line.startswith(f"{name}="):
-            return line.split("=", 1)[1].strip()
+    """Read a key in priority order: settings.json → os.environ → .env file."""
+    # 1. settings.json (Docker volume-persisted, survives restarts)
+    try:
+        if _SETTINGS_PATH.exists():
+            import json as _json
+            data = _json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
+            v = data.get(name, "")
+            if v:
+                return str(v)
+    except Exception:
+        pass
+    # 2. process env
+    import os as _os
+    v = _os.environ.get(name, "")
+    if v:
+        return v
+    # 3. .env file
+    if _ENV_PATH.exists():
+        for line in _ENV_PATH.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1].strip()
     return ""
 
 
@@ -96,11 +116,30 @@ def _cached_fetch_models(api_key: str) -> list[str]:
 
 
 def _write_env_key(name: str, value: str) -> None:
+    """Write to settings.json (Docker-safe) and .env (local dev)."""
+    import json as _json
+    # 1. settings.json
+    try:
+        data = {}
+        if _SETTINGS_PATH.exists():
+            data = _json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
+        if value:
+            data[name] = value
+        else:
+            data.pop(name, None)
+        _SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _SETTINGS_PATH.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    # 2. .env (local dev)
     lines = _ENV_PATH.read_text(encoding="utf-8").splitlines() if _ENV_PATH.exists() else []
     lines = [l for l in lines if not l.startswith(f"{name}=")]
     if value:
         lines.append(f"{name}={value}")
-    _ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        _ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass
 
 
 # ── Bot process management ───────────────────────────────────────────────────────
@@ -509,11 +548,13 @@ if gear_clicked:
 
         # ── Tab IA ─────────────────────────────────────────────────────────────
         with tab_ai:
-            st.markdown("### Analyse IA via OpenRouter")
+            st.markdown("### Analyse IA — Minimax M3 (par défaut) ou OpenRouter")
             st.markdown(
                 "<div style='color:#8B949E;font-size:0.85rem;margin-bottom:1rem;'>"
-                "Un modele IA analysera chaque action toutes les 30 minutes et attribuera "
-                "un score 0-1 pour affiner les decisions du bot."
+                "Un modèle IA analysera chaque action toutes les 30 minutes et attribuera "
+                "un score 0-1 pour affiner les décisions du bot. "
+                "<b>Minimax M3</b> est l'agent interne ultra-efficace (recommandé). "
+                "<b>OpenRouter</b> est conservé comme fallback (ex: perplexity/sonar)."
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -521,34 +562,84 @@ if gear_clicked:
             cfg = _load_config()
             ai_cfg = cfg.setdefault("ai_analysis", {})
 
-            # Current saved key (masked display)
-            saved_key = _read_env_key("OPENROUTER_API_KEY")
-            key_hint = f"Cle actuelle : {saved_key[:8]}••••" if saved_key else "Aucune cle configuree"
-            st.caption(key_hint)
+            # Provider selector
+            provider_options = [
+                ("auto", "Auto (Minimax d'abord, sinon OpenRouter)"),
+                ("minimax", "Minimax M3 (in-house, recommandé)"),
+                ("openrouter", "OpenRouter (gateway tiers)"),
+            ]
+            current_provider = ai_cfg.get("provider", "auto")
+            provider_labels = [label for _, label in provider_options]
+            provider_keys = [k for k, _ in provider_options]
+            try:
+                provider_idx = provider_keys.index(current_provider)
+            except ValueError:
+                provider_idx = 0
+            selected_provider_label = st.selectbox(
+                "Provider IA",
+                provider_labels,
+                index=provider_idx,
+                key="dlg_ai_provider",
+                help="Minimax = modèle interne (M3). OpenRouter = passerelle multi-modèles.",
+            )
+            selected_provider = provider_keys[provider_labels.index(selected_provider_label)]
 
-            new_key = st.text_input(
-                "Cle API OpenRouter",
+            # Keys
+            saved_minimax_key = _read_env_key("MINIMAX_API_KEY")
+            saved_openrouter_key = _read_env_key("OPENROUTER_API_KEY")
+            st.caption(
+                f"🔑 Minimax: {'configurée' if saved_minimax_key else 'absente'}  ·  "
+                f"OpenRouter: {'configurée' if saved_openrouter_key else 'absente'}"
+            )
+
+            new_minimax_key = st.text_input(
+                "Clé API Minimax",
+                value="",
+                type="password",
+                placeholder="sk-cp-...",
+                key="dlg_minimax_key",
+                help="Stockée dans settings.json (chiffré sur volume Docker).",
+            )
+            new_openrouter_key = st.text_input(
+                "Clé API OpenRouter",
                 value="",
                 type="password",
                 placeholder="sk-or-v1-...",
                 key="dlg_or_key",
-                help="Votre cle API sur openrouter.ai — jamais stockee en clair dans le code",
             )
 
-            current_model = ai_cfg.get("model", "perplexity/sonar")
-            with st.spinner("Chargement des modeles OpenRouter..."):
-                available_models = _cached_fetch_models(api_key=saved_key or new_key)
-            if not available_models:
-                st.warning("Impossible de recuperer la liste des modeles. Verifiez votre connexion ou entrez votre cle API.")
-                available_models = [current_model] if current_model else ["perplexity/sonar"]
-            model_idx = available_models.index(current_model) if current_model in available_models else 0
-            selected_model = st.selectbox(
-                f"Modele IA ({len(available_models)} disponibles)",
-                available_models,
-                index=model_idx,
-                key="dlg_or_model",
-                help="perplexity/sonar(-pro) recommande : acces web natif pour les actualites en temps reel",
-            )
+            # Model selection (per provider)
+            current_minimax_model = ai_cfg.get("minimax_model", "MiniMax-M3")
+            current_or_model = ai_cfg.get("openrouter_model", ai_cfg.get("model", "perplexity/sonar"))
+
+            c1, c2 = st.columns(2)
+            with c1:
+                minimax_model = st.text_input(
+                    "Modèle Minimax",
+                    value=current_minimax_model,
+                    key="dlg_minimax_model",
+                    help="Par défaut : MiniMax-M3",
+                )
+            with c2:
+                with st.spinner("Chargement des modèles OpenRouter..."):
+                    available_models = _cached_fetch_models(
+                        api_key=saved_openrouter_key or new_openrouter_key
+                    )
+                if not available_models:
+                    available_models = [current_or_model] if current_or_model else ["perplexity/sonar"]
+                model_idx = (
+                    available_models.index(current_or_model)
+                    if current_or_model in available_models else 0
+                )
+                openrouter_model = st.selectbox(
+                    f"Modèle OpenRouter ({len(available_models)} disponibles)",
+                    available_models,
+                    index=model_idx,
+                    key="dlg_or_model",
+                )
+
+            # Optional: explicit override model (auto-selects both)
+            explicit_model = ai_cfg.get("model", "")
 
             ai_enabled = st.toggle(
                 "Activer l'analyse IA",
@@ -557,42 +648,69 @@ if gear_clicked:
             )
 
             score_weight = st.slider(
-                "Poids du score IA dans la decision",
+                "Poids du score IA dans la décision",
                 min_value=0.0, max_value=1.0,
                 value=float(ai_cfg.get("score_weight", 0.3)),
                 step=0.05,
                 key="dlg_score_weight",
-                help="0 = l'IA n'influence pas le bot | 1 = decision basee uniquement sur l'IA",
+                help="0 = l'IA n'influence pas le bot | 1 = décision basée uniquement sur l'IA",
+            )
+
+            cache_ttl = st.slider(
+                "Durée du cache IA (secondes)",
+                min_value=0, max_value=7200,
+                value=int(ai_cfg.get("cache_ttl_seconds", 1800)),
+                step=300,
+                key="dlg_ai_cache_ttl",
+                help="Évite les appels LLM dupliqués pour la même action dans la fenêtre.",
             )
 
             col_save, col_test = st.columns(2)
 
             with col_save:
                 if st.button("💾 Sauvegarder", use_container_width=True, type="primary", key="dlg_ai_save"):
-                    if new_key:
-                        _write_env_key("OPENROUTER_API_KEY", new_key)
-                    ai_cfg["model"] = selected_model
+                    if new_minimax_key:
+                        _write_env_key("MINIMAX_API_KEY", new_minimax_key)
+                        _write_env_key("ANTHROPIC_AUTH_TOKEN", new_minimax_key)
+                    if new_openrouter_key:
+                        _write_env_key("OPENROUTER_API_KEY", new_openrouter_key)
+                    ai_cfg["provider"] = selected_provider
+                    ai_cfg["model"] = ""  # use per-provider defaults
+                    ai_cfg["minimax_model"] = minimax_model
+                    ai_cfg["openrouter_model"] = openrouter_model
                     ai_cfg["enabled"] = ai_enabled
                     ai_cfg["score_weight"] = score_weight
+                    ai_cfg["cache_ttl_seconds"] = int(cache_ttl)
                     _save_config(cfg)
-                    if ai_enabled and (new_key or saved_key):
+                    if ai_enabled and (saved_minimax_key or new_minimax_key
+                                        or saved_openrouter_key or new_openrouter_key):
                         ai_scheduler.start(ALL_TICKERS)
                     elif not ai_enabled:
                         ai_scheduler.stop()
-                    st.success("Configuration IA sauvegardee !")
+                    st.success("Configuration IA sauvegardée !")
 
             with col_test:
                 if st.button("🔌 Tester la connexion", use_container_width=True, key="dlg_ai_test"):
-                    key_to_test = new_key or saved_key
+                    if selected_provider == "minimax":
+                        key_to_test = new_minimax_key or saved_minimax_key
+                    elif selected_provider == "openrouter":
+                        key_to_test = new_openrouter_key or saved_openrouter_key
+                    else:  # auto → test whichever is configured
+                        key_to_test = (new_minimax_key or saved_minimax_key
+                                       or new_openrouter_key or saved_openrouter_key)
                     if not key_to_test:
-                        st.error("Entrez d'abord une cle API.")
+                        st.error("Entrez d'abord une clé API pour le provider sélectionné.")
                     else:
-                        with st.spinner("Connexion a OpenRouter..."):
-                            ok = asyncio.run(test_connection(key_to_test, selected_model))
-                        if ok:
-                            st.success(f"Connexion reussie — modele : {selected_model}")
+                        with st.spinner(f"Connexion à {selected_provider}..."):
+                            res = test_provider_connection(
+                                selected_provider if selected_provider != "auto" else "minimax",
+                                key_to_test,
+                                model=minimax_model if selected_provider == "minimax" else openrouter_model,
+                            )
+                        if res.get("ok"):
+                            st.success(f"Connexion réussie — {res.get('provider')}/{res.get('model')}")
                         else:
-                            st.error("Echec — verifiez votre cle sur openrouter.ai")
+                            st.error(f"Échec : {res.get('error', 'inconnu')}")
 
     config_modal()
 

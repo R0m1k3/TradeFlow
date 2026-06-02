@@ -517,7 +517,20 @@ def get_config():
     default_symbols = cfg.get("default_symbols", ["AAPL", "MSFT", "NVDA"])
 
     ai = cfg.get("ai_analysis", {})
-    saved_key = _read_env_key("OPENROUTER_API_KEY")
+    from app.ai.provider import (
+        MINIMAX_DEFAULT_MODEL,
+        OPENROUTER_DEFAULT_MODEL,
+        get_minimax_key,
+        get_openrouter_key,
+    )
+    minimax_key = get_minimax_key()
+    openrouter_key = get_openrouter_key()
+
+    provider = ai.get("provider", "auto")
+    # Show the configured key hint for the *active* provider first
+    active_key = minimax_key if provider == "minimax" else openrouter_key
+    if provider == "auto":
+        active_key = minimax_key or openrouter_key
 
     return {
         "capital": lt.get("initial_capital", cfg.get("algo_capital", cfg.get("default_capital", 10000))),
@@ -540,11 +553,16 @@ def get_config():
         "interval": lt.get("interval", "1h"),
         # AI analysis
         "ai_enabled": ai.get("enabled", False),
+        "ai_provider": provider,
         "ai_mode": ai.get("mode", "hybrid"),
-        "ai_model": ai.get("model", "perplexity/sonar"),
+        "ai_model": ai.get("model", ""),
+        "ai_minimax_model": ai.get("minimax_model", MINIMAX_DEFAULT_MODEL),
+        "ai_openrouter_model": ai.get("openrouter_model", OPENROUTER_DEFAULT_MODEL),
         "ai_score_weight": ai.get("score_weight", 0.3),
-        "ai_key_configured": bool(saved_key),
-        "ai_key_hint": f"{saved_key[:8]}••••" if saved_key else "",
+        "ai_minimax_key_configured": bool(minimax_key),
+        "ai_openrouter_key_configured": bool(openrouter_key),
+        "ai_key_configured": bool(active_key),
+        "ai_key_hint": f"{active_key[:8]}••••" if active_key else "",
     }
 
 
@@ -599,12 +617,37 @@ def save_config(body: dict = Body(default={})):
             ai["enabled"] = bool(body["ai_enabled"])
         if "ai_mode" in body and body["ai_mode"] in ("hybrid", "autonomous"):
             ai["mode"] = body["ai_mode"]
+        if "ai_provider" in body and body["ai_provider"] in ("minimax", "openrouter", "auto"):
+            ai["provider"] = body["ai_provider"]
         if "ai_model" in body:
             ai["model"] = str(body["ai_model"])
+        if "ai_minimax_model" in body:
+            ai["minimax_model"] = str(body["ai_minimax_model"])
+        if "ai_openrouter_model" in body:
+            ai["openrouter_model"] = str(body["ai_openrouter_model"])
         if "ai_score_weight" in body:
             ai["score_weight"] = float(body["ai_score_weight"])
+        if "ai_cache_ttl_seconds" in body:
+            try:
+                ai["cache_ttl_seconds"] = max(0, int(body["ai_cache_ttl_seconds"]))
+            except (TypeError, ValueError):
+                pass
+        # API keys — write to the *correct* slot based on provider
+        provider_for_key = (ai.get("provider") or "auto").lower()
+        if "ai_minimax_key" in body and body["ai_minimax_key"]:
+            _write_env_key("MINIMAX_API_KEY", str(body["ai_minimax_key"]))
+            # Mirror to ANTHROPIC_AUTH_TOKEN for clients that expect the Anthropic name
+            _write_env_key("ANTHROPIC_AUTH_TOKEN", str(body["ai_minimax_key"]))
+        if "ai_openrouter_key" in body and body["ai_openrouter_key"]:
+            _write_env_key("OPENROUTER_API_KEY", str(body["ai_openrouter_key"]))
+        # Backward-compat: legacy `ai_key` field writes to the active provider
         if "ai_key" in body and body["ai_key"]:
-            _write_env_key("OPENROUTER_API_KEY", str(body["ai_key"]))
+            key = str(body["ai_key"])
+            if provider_for_key == "minimax":
+                _write_env_key("MINIMAX_API_KEY", key)
+                _write_env_key("ANTHROPIC_AUTH_TOKEN", key)
+            else:
+                _write_env_key("OPENROUTER_API_KEY", key)
 
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
@@ -1038,53 +1081,40 @@ def get_ai_score(symbol: str):
 
 @app.post("/api/ai/score/{symbol}")
 def trigger_ai_score(symbol: str):
-    """Trigger an immediate on-demand AI analysis for a ticker (sync, uses requests)."""
-    import requests as req
-    import json as _json
-    from datetime import datetime as _dt
+    """Trigger an immediate on-demand AI analysis for a ticker.
 
-    cfg = _load_config()
-    ai_cfg = cfg.get("ai_analysis", {})
-    api_key = _read_env_key("OPENROUTER_API_KEY")
-    model = ai_cfg.get("model", "perplexity/sonar")
-    timeout = ai_cfg.get("timeout_seconds", 30)
+    Routes through the unified provider (Minimax or OpenRouter depending on config).
+    """
+    from app.ai.provider import load_ai_config, call_ai
+    from app.ai.openrouter_client import PROMPT_TEMPLATE
 
-    if not api_key:
-        raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY non configurée")
+    cfg_dict = _load_config()
+    ai_cfg_dict = cfg_dict.get("ai_analysis", {})
+    cfg = load_ai_config(ai_cfg_dict)
+    try:
+        provider, key, model = (cfg.provider, "", cfg.model)
+        from app.ai.provider import resolve_active_provider
+        provider, key, model = resolve_active_provider(cfg)
+    except Exception:
+        provider, key, model = cfg.provider, "", cfg.model
+
+    if not key:
+        raise HTTPException(
+            status_code=400,
+            detail=("MINIMAX_API_KEY non configurée" if provider == "minimax"
+                    else "OPENROUTER_API_KEY non configurée"),
+        )
 
     ticker = symbol.upper()
-    prompt = (
-        f"Ticker boursier : {ticker}\n"
-        f"Date et heure : {_dt.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-        "Analyse le comportement probable de cette action sur les prochaines 24-48 heures "
-        "en te basant sur les dernières actualités, la tendance du secteur, et le sentiment du marché.\n\n"
-        "Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après :\n"
-        '{"score": <float 0.0-1.0>, "rationale": "<analyse concise en français, 2-3 phrases>", '
-        '"sources": [{"title": "<titre>", "url": "<url complète>"}, ...]}\n\n'
-        "0.0 = fort signal de vente, 0.5 = neutre, 1.0 = fort signal d'achat. "
-        "Inclure 2 à 4 sources réelles et vérifiables."
+    prompt = PROMPT_TEMPLATE.format(
+        ticker=ticker, date=datetime.now().strftime("%Y-%m-%d %H:%M")
     )
     try:
-        r = req.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://tradeflow.local",
-                "X-Title": "TradeFlow",
-            },
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            },
-            timeout=timeout,
-        )
-        r.raise_for_status()
-        content = r.json()["choices"][0]["message"]["content"]
-        data = _json.loads(content)
+        result = call_ai(prompt, mode="hybrid", cfg=cfg, use_cache=False)
+        data = result.get("json") or {}
         score = max(0.0, min(1.0, float(data.get("score", 0.5))))
-        rationale = data.get("rationale", "")
-        sources = data.get("sources", [])
+        rationale = data.get("rationale", "") or ""
+        sources = data.get("sources") or []
         if not isinstance(sources, list):
             sources = []
 
@@ -1098,6 +1128,7 @@ def trigger_ai_score(symbol: str):
             "success": True, "available": True,
             "symbol": ticker, "score": score,
             "rationale": rationale, "sources": sources,
+            "provider": result["provider"], "model": result["model"],
             "ts": time.time(), "age_seconds": 0,
         }
     except HTTPException:
@@ -1120,57 +1151,66 @@ def force_ai_analysis():
 
 @app.get("/api/ai/status")
 def get_ai_status():
-    """Return the AI scheduler status and last completed cycle info."""
+    """Return the AI scheduler status, last cycle info, and provider health."""
     try:
         from app.ai import scheduler as ai_scheduler
+        from app.ai.provider import provider_status
         status = ai_scheduler.get_status()
+        prov = provider_status()
         return {
             "running": status["running"],
             "last_run_at": status["last_run_at"],
             "last_run_mode": status["last_run_mode"],
+            "last_run_provider": status.get("last_run_provider"),
+            "last_run_model": status.get("last_run_model"),
             "last_run_ticker_count": status["last_run_ticker_count"],
+            "last_run_success_count": status.get("last_run_success_count"),
+            "last_run_error_count": status.get("last_run_error_count"),
+            "providers": prov,
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/ai/models")
-def get_ai_models():
-    """Return all models available on OpenRouter."""
-    import requests as req
+def get_ai_models(provider: str = Query("openrouter", description="minimax | openrouter")):
+    """Return models available for the requested provider.
+
+    For "minimax", returns the configured list (the in-house M3 family).
+    For "openrouter", fetches the live catalog (network call, may fail).
+    """
+    provider = (provider or "openrouter").lower()
+    if provider == "minimax":
+        from app.ai.provider import MINIMAX_DEFAULT_MODEL
+        return {"provider": "minimax", "models": [MINIMAX_DEFAULT_MODEL, "MiniMax-M2", "MiniMax-M2.5"]}
+    # openrouter
+    from app.ai.provider import list_openrouter_models
     api_key = _read_env_key("OPENROUTER_API_KEY")
-    headers = {"HTTP-Referer": "https://tradeflow.local", "X-Title": "TradeFlow"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        r = req.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=10)
-        r.raise_for_status()
-        models = r.json().get("data", [])
-        return {"models": sorted(m["id"] for m in models if "id" in m)}
-    except Exception as exc:
-        logger.warning("Failed to fetch OpenRouter models: %s", exc)
-        raise HTTPException(status_code=502, detail=f"OpenRouter unreachable: {exc}")
+    models = list_openrouter_models(api_key=api_key, timeout=10)
+    if not models:
+        raise HTTPException(status_code=502, detail="OpenRouter unreachable")
+    return {"provider": "openrouter", "models": models}
 
 
 @app.post("/api/ai/test")
 def test_ai_connection(body: dict = Body(default={})):
-    """Test OpenRouter connection with the given API key and model."""
-    import requests as req
-    api_key = body.get("api_key") or _read_env_key("OPENROUTER_API_KEY")
-    model = body.get("model", "perplexity/sonar")
+    """Test AI connection for either Minimax or OpenRouter.
+
+    Body: { provider: "minimax"|"openrouter", api_key?: str, model?: str }
+    """
+    from app.ai.provider import test_connection as _test
+    provider = (body.get("provider") or "openrouter").lower()
+    if provider not in ("minimax", "openrouter"):
+        raise HTTPException(status_code=400, detail="provider must be 'minimax' or 'openrouter'")
+    api_key = body.get("api_key") or (
+        _read_env_key("MINIMAX_API_KEY") if provider == "minimax"
+        else _read_env_key("OPENROUTER_API_KEY")
+    )
     if not api_key:
         raise HTTPException(status_code=400, detail="No API key provided")
-    try:
-        r = req.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "HTTP-Referer": "https://tradeflow.local"},
-            json={"model": model, "messages": [{"role": "user", "content": 'Reply with valid JSON only: {"score": 0.5}'}], "response_format": {"type": "json_object"}},
-            timeout=15,
-        )
-        r.raise_for_status()
-        return {"success": True, "model": model}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    model = body.get("model")
+    res = _test(provider, api_key, model=model, timeout=15)
+    return res
 
 
 # ── Autonomous AI agent ──────────────────────────────────────────────────────────
@@ -1210,43 +1250,36 @@ Inclure 3 à 6 sources réelles et récentes (< 48h). Posts X acceptés.
 
 
 def _do_autonomous_analysis(ticker: str, cfg: dict) -> dict:
-    """Run a single autonomous analysis using requests (sync). Returns decision dict."""
-    import requests as req
-    import json as _json
-    from datetime import datetime as _dt
+    """Run a single autonomous analysis via the unified provider. Returns decision dict."""
+    from app.ai.provider import load_ai_config, resolve_active_provider, call_ai
 
     ai_cfg = cfg.get("ai_analysis", {})
-    api_key = _read_env_key("OPENROUTER_API_KEY")
-    model = ai_cfg.get("model", "perplexity/sonar")
-    timeout = ai_cfg.get("timeout_seconds", 45)
-
+    provider_cfg = load_ai_config(ai_cfg)
+    provider, api_key, _model = resolve_active_provider(provider_cfg)
     if not api_key:
-        raise ValueError("OPENROUTER_API_KEY non configurée")
+        raise ValueError(
+            "MINIMAX_API_KEY non configurée" if provider == "minimax"
+            else "OPENROUTER_API_KEY non configurée"
+        )
 
     prompt = _AUTONOMOUS_PROMPT.format(
         ticker=ticker.upper(),
-        date=_dt.now().strftime("%Y-%m-%d %H:%M"),
+        date=datetime.now().strftime("%Y-%m-%d %H:%M"),
     )
 
-    r = req.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "HTTP-Referer": "https://tradeflow.local", "X-Title": "TradeFlow"},
-        json={"model": model, "messages": [{"role": "user", "content": prompt}], "response_format": {"type": "json_object"}},
-        timeout=timeout,
-    )
-    r.raise_for_status()
-    data = _json.loads(r.json()["choices"][0]["message"]["content"])
+    result = call_ai(prompt, mode="autonomous", cfg=provider_cfg, use_cache=True)
+    data = result.get("json") or {}
 
-    action = data.get("action", "HOLD").upper()
+    action = (data.get("action") or "HOLD").upper()
     if action not in ("BUY", "SELL", "HOLD"):
         action = "HOLD"
     confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
     if confidence < 0.5:
         action = "HOLD"
-    pos = max(0.0, min(10.0, float(data.get("position_size_pct", 0))))
-    sl = max(0.5, min(15.0, float(data.get("stop_loss_pct", 2.0))))
-    tp = max(1.0, min(30.0, float(data.get("take_profit_pct", 4.0))))
-    sources = data.get("sources", [])
+    pos = max(0.0, min(10.0, float(data.get("position_size_pct", 0) or 0)))
+    sl = max(0.5, min(15.0, float(data.get("stop_loss_pct", 2.0) or 2.0)))
+    tp = max(1.0, min(30.0, float(data.get("take_profit_pct", 4.0) or 4.0)))
+    sources = data.get("sources") or []
     if not isinstance(sources, list):
         sources = []
 
@@ -1254,12 +1287,11 @@ def _do_autonomous_analysis(ticker: str, cfg: dict) -> dict:
     score_store.set_decision(
         ticker.upper(), action, confidence, pos, sl, tp,
         data.get("time_horizon", "24h"),
-        data.get("rationale", ""),
-        data.get("key_risks", ""),
+        data.get("rationale", "") or "",
+        data.get("key_risks", "") or "",
         sources,
     )
 
-    # Execute against ARIA virtual portfolio if action is tradeable
     if action in ("BUY", "SELL"):
         try:
             import yfinance as yf
@@ -1273,7 +1305,10 @@ def _do_autonomous_analysis(ticker: str, cfg: dict) -> dict:
         except Exception as exc:
             logger.warning("ARIA portfolio execution failed for %s: %s", ticker, exc)
 
-    return score_store.get_decision(ticker.upper()) or {}
+    decision = score_store.get_decision(ticker.upper()) or {}
+    decision["provider"] = result.get("provider")
+    decision["model"] = result.get("model")
+    return decision
 
 
 @app.get("/api/comparison")
